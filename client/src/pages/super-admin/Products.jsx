@@ -41,6 +41,7 @@ const initialForm = {
 
 export default function Products() {
   const [products, setProducts] = useState([]);
+  const [summary, setSummary] = useState({});
   const [categories, setCategories] = useState([]);
   const [subCategories, setSubCategories] = useState([]);
   const [units, setUnits] = useState([]);
@@ -60,16 +61,16 @@ export default function Products() {
   const [additionalImageFiles, setAdditionalImageFiles] = useState([]);
   const [additionalImagePreviews, setAdditionalImagePreviews] = useState([]);
 
+  const fetchSummary = async () => {
+    try { const res = await API.get("/api/products/summary"); if (res.data.success) setSummary(res.data.summary || {}); } catch { setSummary({}); }
+  };
+
   const fetchProducts = async () => {
     try {
       setLoading(true);
       setError("");
-
-      const res = await API.get("/api/products");
-
-      if (res.data.success) {
-        setProducts(res.data.products || []);
-      }
+      const [prodRes] = await Promise.all([API.get("/api/products"), fetchSummary()]);
+      if (prodRes.data.success) setProducts(prodRes.data.products || []);
     } catch (err) {
       setError(err.response?.data?.message || "Failed to fetch products");
     } finally {
@@ -409,18 +410,26 @@ export default function Products() {
     }
   };
 
-  const handleDeactivate = async (id) => {
-    const confirmDelete = window.confirm(
-      "Are you sure you want to deactivate this product?"
-    );
-
-    if (!confirmDelete) return;
-
+  const handleToggleStatus = async (product) => {
+    const newStatus = product.status === "active" ? "inactive" : "active";
+    if (!window.confirm(`${newStatus === "inactive" ? "Deactivate" : "Activate"} product "${product.name}"?`)) return;
     try {
-      await API.delete(`/api/products/${id}`);
+      setError("");
+      await API.patch(`/api/products/${product.id}/status`, { status: newStatus });
       fetchProducts();
     } catch (err) {
-      setError(err.response?.data?.message || "Failed to deactivate product");
+      setError(err.response?.data?.message || "Failed to update product status");
+    }
+  };
+
+  const handleDelete = async (product) => {
+    if (!window.confirm(`Permanently delete product "${product.name}"? This cannot be undone.`)) return;
+    try {
+      setError("");
+      await API.delete(`/api/products/${product.id}`);
+      fetchProducts();
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to delete product");
     }
   };
 
@@ -979,30 +988,22 @@ export default function Products() {
 
         <div className="stats-grid">
           <div className="stat-card">
-            <h3>{products.length}</h3>
+            <h3>{Number(summary.total_products) || products.length}</h3>
             <p>Total Products</p>
           </div>
 
           <div className="stat-card">
-            <h3>{products.filter((p) => p.status === "active").length}</h3>
+            <h3>{Number(summary.active_products) || products.filter((p) => p.status === "active").length}</h3>
             <p>Active Products</p>
           </div>
 
           <div className="stat-card">
-            <h3>{categories.length}</h3>
-            <p>Categories</p>
+            <h3>{Number(summary.inactive_products) || products.filter((p) => p.status === "inactive").length}</h3>
+            <p>Inactive Products</p>
           </div>
 
           <div className="stat-card">
-            <h3>
-              ₹
-              {formatAmount(
-                products.reduce(
-                  (sum, product) => sum + Number(product.base_price || 0),
-                  0
-                )
-              )}
-            </h3>
+            <h3>₹{formatAmount(Number(summary.total_base_value) || products.reduce((sum, p) => sum + Number(p.base_price || 0), 0))}</h3>
             <p>Total Base Value</p>
           </div>
         </div>
@@ -1492,21 +1493,27 @@ export default function Products() {
                           <button
                             className="edit-btn"
                             onClick={() => handleEdit(product)}
+                            title="Edit"
                           >
                             <Edit3 size={16} />
                           </button>
 
-                          {product.status === "active" ? (
-                            <button
-                              className="delete-btn"
-                              onClick={() => handleDeactivate(product.id)}
-                              title="Deactivate Product"
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          ) : (
-                            <span className="small-text">Deactivated</span>
-                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleToggleStatus(product)}
+                            title={product.status === "active" ? "Deactivate" : "Activate"}
+                            style={{height:'32px',padding:'0 10px',borderRadius:'10px',border:'none',cursor:'pointer',fontWeight:700,fontSize:'11px',background:product.status==="active"?'#fff1f1':'#effbf4',color:product.status==="active"?'#d63636':'#1c9b58'}}
+                          >
+                            {product.status === "active" ? "Deactivate" : "Activate"}
+                          </button>
+
+                          <button
+                            className="delete-btn"
+                            onClick={() => handleDelete(product)}
+                            title="Delete permanently"
+                          >
+                            <Trash2 size={16} />
+                          </button>
                         </div>
                       </td>
                     </tr>

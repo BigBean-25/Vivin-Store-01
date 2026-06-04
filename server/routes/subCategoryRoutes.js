@@ -4,12 +4,14 @@ const path = require("path");
 const fs = require("fs");
 
 const {
+  getSubCategorySummary,
   getSubCategories,
   getActiveSubCategories,
   getSubCategoriesByCategory,
   createSubCategory,
   getSubCategoryById,
   updateSubCategory,
+  updateSubCategoryStatus,
   deleteSubCategory,
 } = require("../controllers/subCategoryController");
 
@@ -58,12 +60,14 @@ const upload = multer({
   },
 });
 
-router.get("/", protect, getSubCategories);
+router.get("/summary", protect, getSubCategorySummary);
 router.get("/active/list", protect, getActiveSubCategories);
 router.get("/category/:categoryId", protect, getSubCategoriesByCategory);
+router.get("/", protect, getSubCategories);
 router.post("/", protect, upload.single("image"), createSubCategory);
 router.get("/:id", protect, getSubCategoryById);
 router.put("/:id", protect, upload.single("image"), updateSubCategory);
+router.patch("/:id/status", protect, updateSubCategoryStatus);
 router.delete("/:id", protect, deleteSubCategory);
 
 module.exports = router;

@@ -26,6 +26,22 @@ const deleteImageFile = (imagePath) => {
   }
 };
 
+exports.getBrandSummary = async (req, res) => {
+  try {
+    const [[summary]] = await db.query(`
+      SELECT
+        COUNT(id) AS total_brands,
+        SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active_brands,
+        SUM(CASE WHEN status = 'inactive' THEN 1 ELSE 0 END) AS inactive_brands
+      FROM brands
+    `);
+
+    res.json({ success: true, summary });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to fetch brand summary", error: error.message });
+  }
+};
+
 exports.getBrands = async (req, res) => {
   try {
     const [brands] = await db.query(`
@@ -249,35 +265,58 @@ exports.updateBrand = async (req, res) => {
   }
 };
 
+exports.updateBrandStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!['active', 'inactive'].includes(status)) {
+      return res.status(400).json({ success: false, message: "Status must be active or inactive" });
+    }
+
+    const [result] = await db.query(
+      `UPDATE brands SET status = ? WHERE id = ?`,
+      [status, id]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: "Brand not found" });
+    }
+
+    res.json({ success: true, message: `Brand ${status} successfully` });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to update brand status", error: error.message });
+  }
+};
+
 exports.deleteBrand = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const [result] = await db.query(
-      `
-      UPDATE brands
-      SET status = 'inactive'
-      WHERE id = ?
-      `,
+    const [[usage]] = await db.query(
+      `SELECT COUNT(id) AS cnt FROM products WHERE brand_id = ? LIMIT 1`,
       [id]
     );
 
-    if (result.affectedRows === 0) {
-      return res.status(404).json({
+    if (usage.cnt > 0) {
+      return res.status(409).json({
         success: false,
-        message: "Brand not found",
+        message: `Cannot delete — brand is used by ${usage.cnt} product(s). Deactivate it instead.`,
       });
     }
 
-    res.json({
-      success: true,
-      message: "Brand deactivated successfully",
-    });
+    const [[brand]] = await db.query(`SELECT logo FROM brands WHERE id = ? LIMIT 1`, [id]);
+
+    if (!brand) {
+      return res.status(404).json({ success: false, message: "Brand not found" });
+    }
+
+    await db.query(`DELETE FROM brands WHERE id = ?`, [id]);
+
+    if (brand.logo) deleteImageFile(brand.logo);
+
+    res.json({ success: true, message: "Brand deleted successfully" });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to deactivate brand",
-      error: error.message,
-    });
+    res.status(500).json({ success: false, message: "Failed to delete brand", error: error.message });
   }
 };

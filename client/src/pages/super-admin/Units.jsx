@@ -20,6 +20,7 @@ const initialForm = {
 
 export default function Units() {
   const [units, setUnits] = useState([]);
+  const [summary, setSummary] = useState({});
   const [formData, setFormData] = useState(initialForm);
   const [editingUnitId, setEditingUnitId] = useState(null);
   const [search, setSearch] = useState("");
@@ -29,16 +30,16 @@ export default function Units() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  const fetchSummary = async () => {
+    try { const res = await API.get("/api/units/summary"); if (res.data.success) setSummary(res.data.summary || {}); } catch { setSummary({}); }
+  };
+
   const fetchUnits = async () => {
     try {
       setLoading(true);
       setError("");
-
-      const res = await API.get("/api/units");
-
-      if (res.data.success) {
-        setUnits(res.data.units || []);
-      }
+      const [unitsRes] = await Promise.all([API.get("/api/units"), fetchSummary()]);
+      if (unitsRes.data.success) setUnits(unitsRes.data.units || []);
     } catch (err) {
       setError(err.response?.data?.message || "Failed to fetch units");
     } finally {
@@ -135,18 +136,26 @@ export default function Units() {
     }
   };
 
-  const handleDeactivate = async (id) => {
-    const confirmDelete = window.confirm(
-      "Are you sure you want to deactivate this unit?"
-    );
-
-    if (!confirmDelete) return;
-
+  const handleToggleStatus = async (unit) => {
+    const newStatus = unit.status === "active" ? "inactive" : "active";
+    if (!window.confirm(`${newStatus === "inactive" ? "Deactivate" : "Activate"} unit "${unit.name}"?`)) return;
     try {
-      await API.delete(`/api/units/${id}`);
+      setError("");
+      await API.patch(`/api/units/${unit.id}/status`, { status: newStatus });
       fetchUnits();
     } catch (err) {
-      setError(err.response?.data?.message || "Failed to deactivate unit");
+      setError(err.response?.data?.message || "Failed to update unit status");
+    }
+  };
+
+  const handleDelete = async (unit) => {
+    if (!window.confirm(`Permanently delete unit "${unit.name}"? This cannot be undone.`)) return;
+    try {
+      setError("");
+      await API.delete(`/api/units/${unit.id}`);
+      fetchUnits();
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to delete unit");
     }
   };
 
@@ -209,7 +218,7 @@ export default function Units() {
 
         <div className="unit-hero"><div className="hero-left"><div className="hero-icon"><Ruler size={28} /></div><div><h1>Product Units</h1><p>Manage units like KG, Gram, Litre, ML, Piece, Box, Packet and Dozen. These units will be used in product creation.</p></div></div><div className="hero-actions"><button className="secondary-btn" onClick={fetchUnits}><RefreshCw size={17} />Refresh</button><button className="primary-btn" onClick={() => setShowForm(true)}><Plus size={18} />Add Unit</button></div></div>
 
-        <div className="stats-grid"><div className="stat-card"><h3>{units.length}</h3><p>Total Units</p></div><div className="stat-card"><h3>{units.filter((u) => u.status === "active").length}</h3><p>Active Units</p></div><div className="stat-card"><h3>{units.filter((u) => u.type === "weight").length}</h3><p>Weight Units</p></div><div className="stat-card"><h3>{units.filter((u) => u.type === "count").length}</h3><p>Count Units</p></div></div>
+        <div className="stats-grid"><div className="stat-card"><h3>{Number(summary.total_units) || units.length}</h3><p>Total Units</p></div><div className="stat-card"><h3>{Number(summary.active_units) || units.filter((u) => u.status === "active").length}</h3><p>Active Units</p></div><div className="stat-card"><h3>{Number(summary.weight_units) || units.filter((u) => u.type === "weight").length}</h3><p>Weight Units</p></div><div className="stat-card"><h3>{Number(summary.count_units) || units.filter((u) => u.type === "count").length}</h3><p>Count Units</p></div></div>
 
         {error && <div className="error-box">{error}</div>}
 
@@ -217,7 +226,7 @@ export default function Units() {
 
         <div className="toolbar"><div className="search-wrap"><Search size={17} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search unit name, short name or type..." /></div><select className="filter-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}><option value="active">Active Units</option><option value="inactive">Inactive Units</option><option value="all">All Units</option></select><div>Showing <strong>{filteredUnits.length}</strong> units</div></div>
 
-        <div className="table-card"><div className="table-header"><h2>Unit List</h2><p>Product unit records from MySQL database</p></div>{loading ? (<div className="empty-box"><div><h3>Loading units...</h3><p>Please wait while unit records are loading.</p></div></div>) : filteredUnits.length === 0 ? (<div className="empty-box"><div><h3>No units found</h3><p>Click Add Unit to create your first product unit.</p></div></div>) : (<div className="table-wrap"><table><thead><tr><th>Unit Name</th><th>Short Name</th><th>Type</th><th>Status</th><th>Action</th></tr></thead><tbody>{filteredUnits.map((unit) => (<tr key={unit.id}><td><div className="unit-name">{unit.name}</div></td><td><span className="short-name">{unit.short_name}</span></td><td><span className="type-badge">{unit.type}</span></td><td><span className={`status-badge ${unit.status}`}>{unit.status}</span></td><td><div className="action-buttons"><button className="edit-btn" onClick={() => handleEdit(unit)}><Edit3 size={16} /></button>{unit.status === "active" ? (<button className="delete-btn" onClick={() => handleDeactivate(unit.id)}><Trash2 size={16} /></button>) : (<span>Deactivated</span>)}</div></td></tr>))}</tbody></table></div>)}</div>
+        <div className="table-card"><div className="table-header"><h2>Unit List</h2><p>Product unit records from MySQL database</p></div>{loading ? (<div className="empty-box"><div><h3>Loading units...</h3><p>Please wait while unit records are loading.</p></div></div>) : filteredUnits.length === 0 ? (<div className="empty-box"><div><h3>No units found</h3><p>Click Add Unit to create your first product unit.</p></div></div>) : (<div className="table-wrap"><table><thead><tr><th>Unit Name</th><th>Short Name</th><th>Type</th><th>Status</th><th>Action</th></tr></thead><tbody>{filteredUnits.map((unit) => (<tr key={unit.id}><td><div className="unit-name">{unit.name}</div></td><td><span className="short-name">{unit.short_name}</span></td><td><span className="type-badge">{unit.type}</span></td><td><span className={`status-badge ${unit.status}`}>{unit.status}</span></td><td><div className="action-buttons"><button className="edit-btn" onClick={() => handleEdit(unit)} title="Edit"><Edit3 size={16} /></button><button type="button" onClick={() => handleToggleStatus(unit)} title={unit.status === "active" ? "Deactivate" : "Activate"} style={{height:'32px',padding:'0 10px',borderRadius:'10px',border:'none',cursor:'pointer',fontWeight:700,fontSize:'11px',background:unit.status==="active"?'#fff1f1':'#effbf4',color:unit.status==="active"?'#d63636':'#1c9b58'}}>{unit.status === "active" ? "Deactivate" : "Activate"}</button><button className="delete-btn" onClick={() => handleDelete(unit)} title="Delete permanently"><Trash2 size={16} /></button></div></td></tr>))}</tbody></table></div>)}</div>
       </div>
     </AdminLayout>
   );

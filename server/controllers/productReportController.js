@@ -362,6 +362,193 @@ exports.getProductReportById = async (req, res) => {
   }
 };
 
+exports.getProductsReport = async (req, res) => {
+  try {
+    const meta = await getMeta();
+    if (!validateMeta(meta, res)) return;
+    const { sql, params } = buildReportQuery(meta, req.query);
+    const [reports] = await db.query(sql, params);
+    res.json({ success: true, count: reports.length, reports });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to fetch products report", error: error.message });
+  }
+};
+
+exports.getStockSettingsReport = async (req, res) => {
+  try {
+    const productColumns = await getColumns(PRODUCT_TABLE);
+    const minStockLevel = firstColumn(productColumns, ["min_stock_level", "minimum_stock_level"]);
+    const reorderLevel = firstColumn(productColumns, ["reorder_level", "reorder_point"]);
+    const shelfLife = firstColumn(productColumns, ["shelf_life_days", "shelf_life", "expiry_days"]);
+    const batchTracking = firstColumn(productColumns, ["is_batch_tracking", "batch_tracking"]);
+    const expiryTracking = firstColumn(productColumns, ["is_expiry_tracking", "expiry_tracking"]);
+    const productName = firstColumn(productColumns, ["product_name", "name", "title", "item_name"]);
+    const sku = firstColumn(productColumns, ["sku", "product_sku"]);
+    const status = firstColumn(productColumns, ["status"]);
+    const createdAt = firstColumn(productColumns, ["created_at"]);
+
+    const select = [
+      `p.id`,
+      productName ? `p.\`${productName}\` AS product_name` : `NULL AS product_name`,
+      sku ? `p.\`${sku}\` AS sku` : `NULL AS sku`,
+      status ? `p.\`${status}\` AS status` : `'active' AS status`,
+      minStockLevel ? `p.\`${minStockLevel}\` AS min_stock_level` : `NULL AS min_stock_level`,
+      reorderLevel ? `p.\`${reorderLevel}\` AS reorder_level` : `NULL AS reorder_level`,
+      shelfLife ? `p.\`${shelfLife}\` AS shelf_life_days` : `NULL AS shelf_life_days`,
+      batchTracking ? `p.\`${batchTracking}\` AS is_batch_tracking` : `0 AS is_batch_tracking`,
+      expiryTracking ? `p.\`${expiryTracking}\` AS is_expiry_tracking` : `0 AS is_expiry_tracking`,
+      createdAt ? `p.\`${createdAt}\` AS created_at` : `NULL AS created_at`,
+    ];
+
+    const [reports] = await db.query(`SELECT ${select.join(", ")} FROM ${PRODUCT_TABLE} p ORDER BY p.id DESC`);
+    res.json({ success: true, count: reports.length, reports });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to fetch stock settings report", error: error.message });
+  }
+};
+
+exports.getPricingReport = async (req, res) => {
+  try {
+    const productColumns = await getColumns(PRODUCT_TABLE);
+    const pricingColumns = await getColumns(PRICING_TABLE);
+    if (!pricingColumns.length) return res.json({ success: true, count: 0, reports: [] });
+
+    const productName = firstColumn(productColumns, ["product_name", "name", "title", "item_name"]);
+    const sku = firstColumn(productColumns, ["sku", "product_sku"]);
+    const sellingPrice = firstColumn(pricingColumns, ["selling_price", "sale_price", "price"]);
+    const priceType = firstColumn(pricingColumns, ["price_type", "pricing_type", "type"]);
+    const minQty = firstColumn(pricingColumns, ["min_qty", "minimum_qty"]);
+    const effectiveFrom = firstColumn(pricingColumns, ["effective_from", "start_date", "valid_from"]);
+    const effectiveTo = firstColumn(pricingColumns, ["effective_to", "end_date", "valid_to"]);
+    const pricingStatus = firstColumn(pricingColumns, ["status"]);
+
+    const select = [
+      `pp.id`,
+      `pp.product_id`,
+      productName ? `p.\`${productName}\` AS product_name` : `NULL AS product_name`,
+      sku ? `p.\`${sku}\` AS product_sku` : `NULL AS product_sku`,
+      priceType ? `pp.\`${priceType}\` AS price_type` : `NULL AS price_type`,
+      sellingPrice ? `pp.\`${sellingPrice}\` AS selling_price` : `0 AS selling_price`,
+      minQty ? `pp.\`${minQty}\` AS min_qty` : `NULL AS min_qty`,
+      effectiveFrom ? `pp.\`${effectiveFrom}\` AS effective_from` : `NULL AS effective_from`,
+      effectiveTo ? `pp.\`${effectiveTo}\` AS effective_to` : `NULL AS effective_to`,
+      pricingStatus ? `pp.\`${pricingStatus}\` AS status` : `'active' AS status`,
+      `pp.created_at`,
+    ];
+
+    const { search = "", product_id = "", status = "" } = req.query;
+    const where = [];
+    const params = [];
+    if (product_id) { where.push(`pp.product_id = ?`); params.push(product_id); }
+    if (status && pricingStatus) { where.push(`pp.\`${pricingStatus}\` = ?`); params.push(status); }
+    if (search && productName) { where.push(`p.\`${productName}\` LIKE ?`); params.push(`%${search}%`); }
+
+    const [reports] = await db.query(
+      `SELECT ${select.join(", ")} FROM ${PRICING_TABLE} pp LEFT JOIN ${PRODUCT_TABLE} p ON p.id = pp.product_id ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY pp.id DESC`,
+      params
+    );
+    res.json({ success: true, count: reports.length, reports });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to fetch pricing report", error: error.message });
+  }
+};
+
+exports.getVariantsReport = async (req, res) => {
+  try {
+    const variantColumns = await getColumns(VARIANT_TABLE);
+    const productColumns = await getColumns(PRODUCT_TABLE);
+    if (!variantColumns.length) return res.json({ success: true, count: 0, reports: [] });
+
+    const productName = firstColumn(productColumns, ["product_name", "name", "title", "item_name"]);
+    const variantName = firstColumn(variantColumns, ["variant_name", "name", "title"]);
+    const variantSku = firstColumn(variantColumns, ["sku", "variant_sku"]);
+    const variantStatus = firstColumn(variantColumns, ["status"]);
+    const variantStock = firstColumn(variantColumns, ["stock_qty", "current_stock", "qty", "quantity"]);
+    const variantMinStock = firstColumn(variantColumns, ["min_stock_qty", "minimum_stock", "min_qty"]);
+    const price = firstColumn(variantColumns, ["selling_price", "sale_price", "price"]);
+    const purchasePrice = firstColumn(variantColumns, ["purchase_price", "cost_price"]);
+
+    const select = [
+      `pv.id`,
+      `pv.product_id`,
+      productName ? `p.\`${productName}\` AS product_name` : `NULL AS product_name`,
+      variantName ? `pv.\`${variantName}\` AS variant_name` : `NULL AS variant_name`,
+      variantSku ? `pv.\`${variantSku}\` AS sku` : `NULL AS sku`,
+      variantStatus ? `pv.\`${variantStatus}\` AS status` : `'active' AS status`,
+      variantStock ? `pv.\`${variantStock}\` AS stock_qty` : `0 AS stock_qty`,
+      variantMinStock ? `pv.\`${variantMinStock}\` AS min_stock_qty` : `0 AS min_stock_qty`,
+      price ? `pv.\`${price}\` AS selling_price` : `0 AS selling_price`,
+      purchasePrice ? `pv.\`${purchasePrice}\` AS purchase_price` : `0 AS purchase_price`,
+      `pv.created_at`,
+    ];
+
+    const { search = "", product_id = "", status = "" } = req.query;
+    const where = [];
+    const params = [];
+    if (product_id) { where.push(`pv.product_id = ?`); params.push(product_id); }
+    if (status && variantStatus) { where.push(`pv.\`${variantStatus}\` = ?`); params.push(status); }
+    if (search && (variantName || productName)) {
+      const fields = [variantName && `pv.\`${variantName}\` LIKE ?`, productName && `p.\`${productName}\` LIKE ?`].filter(Boolean);
+      where.push(`(${fields.join(" OR ")})`);
+      fields.forEach(() => params.push(`%${search}%`));
+    }
+
+    const [reports] = await db.query(
+      `SELECT ${select.join(", ")} FROM ${VARIANT_TABLE} pv LEFT JOIN ${PRODUCT_TABLE} p ON p.id = pv.product_id ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY pv.id DESC`,
+      params
+    );
+    res.json({ success: true, count: reports.length, reports });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to fetch variants report", error: error.message });
+  }
+};
+
+exports.getReviewsReport = async (req, res) => {
+  try {
+    const reviewColumns = await getColumns(REVIEW_TABLE);
+    const productColumns = await getColumns(PRODUCT_TABLE);
+    const customerColumns = await getColumns("customers");
+    if (!reviewColumns.length) return res.json({ success: true, count: 0, reports: [] });
+
+    const productName = firstColumn(productColumns, ["product_name", "name", "title", "item_name"]);
+    const rating = firstColumn(reviewColumns, ["rating", "score", "star_rating"]);
+    const reviewText = firstColumn(reviewColumns, ["review", "comment", "feedback", "description"]);
+    const reviewStatus = firstColumn(reviewColumns, ["status"]);
+    const customerId = firstColumn(reviewColumns, ["customer_id", "user_id"]);
+    const customerName = customerId ? firstColumn(customerColumns, ["customer_name", "name", "full_name", "business_name", "contact_person"]) : null;
+
+    const select = [
+      `r.id`,
+      `r.product_id`,
+      productName ? `p.\`${productName}\` AS product_name` : `NULL AS product_name`,
+      customerId ? `r.\`${customerId}\` AS customer_id` : `NULL AS customer_id`,
+      customerName ? `c.\`${customerName}\` AS customer_name` : `NULL AS customer_name`,
+      rating ? `r.\`${rating}\` AS rating` : `0 AS rating`,
+      reviewText ? `r.\`${reviewText}\` AS review` : `NULL AS review`,
+      reviewStatus ? `r.\`${reviewStatus}\` AS status` : `'pending' AS status`,
+      `r.created_at`,
+    ];
+
+    const { search = "", product_id = "", status = "" } = req.query;
+    const where = [];
+    const params = [];
+    if (product_id) { where.push(`r.product_id = ?`); params.push(product_id); }
+    if (status && reviewStatus) { where.push(`r.\`${reviewStatus}\` = ?`); params.push(status); }
+    if (search && productName) { where.push(`p.\`${productName}\` LIKE ?`); params.push(`%${search}%`); }
+
+    const customerJoin = customerId && customerColumns.length
+      ? `LEFT JOIN customers c ON c.id = r.\`${customerId}\`` : "";
+
+    const [reports] = await db.query(
+      `SELECT ${select.join(", ")} FROM ${REVIEW_TABLE} r LEFT JOIN ${PRODUCT_TABLE} p ON p.id = r.product_id ${customerJoin} ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY r.id DESC`,
+      params
+    );
+    res.json({ success: true, count: reports.length, reports });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to fetch reviews report", error: error.message });
+  }
+};
+
 exports.getProductReportSummary = async (req, res) => {
   try {
     const meta = await getMeta();

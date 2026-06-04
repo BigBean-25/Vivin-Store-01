@@ -23,6 +23,7 @@ const API_BASE_URL =
 
 export default function Brands() {
   const [brands, setBrands] = useState([]);
+  const [summary, setSummary] = useState({});
   const [formData, setFormData] = useState(initialForm);
   const [editingBrandId, setEditingBrandId] = useState(null);
   const [search, setSearch] = useState("");
@@ -34,16 +35,22 @@ export default function Brands() {
   const [logoFile, setLogoFile] = useState(null);
   const [logoPreview, setLogoPreview] = useState("");
 
+  const fetchSummary = async () => {
+    try {
+      const res = await API.get("/api/brands/summary");
+      if (res.data.success) setSummary(res.data.summary || {});
+    } catch { setSummary({}); }
+  };
+
   const fetchBrands = async () => {
     try {
       setLoading(true);
       setError("");
-
-      const res = await API.get("/api/brands");
-
-      if (res.data.success) {
-        setBrands(res.data.brands || []);
-      }
+      const [brandsRes] = await Promise.all([
+        API.get("/api/brands"),
+        fetchSummary(),
+      ]);
+      if (brandsRes.data.success) setBrands(brandsRes.data.brands || []);
     } catch (err) {
       setError(err.response?.data?.message || "Failed to fetch brands");
     } finally {
@@ -211,18 +218,26 @@ export default function Brands() {
     }
   };
 
-  const handleDeactivate = async (id) => {
-    const confirmDelete = window.confirm(
-      "Are you sure you want to deactivate this brand?"
-    );
-
-    if (!confirmDelete) return;
-
+  const handleToggleStatus = async (brand) => {
+    const newStatus = brand.status === "active" ? "inactive" : "active";
+    if (!window.confirm(`${newStatus === "inactive" ? "Deactivate" : "Activate"} brand "${brand.name}"?`)) return;
     try {
-      await API.delete(`/api/brands/${id}`);
+      setError("");
+      await API.patch(`/api/brands/${brand.id}/status`, { status: newStatus });
       fetchBrands();
     } catch (err) {
-      setError(err.response?.data?.message || "Failed to deactivate brand");
+      setError(err.response?.data?.message || "Failed to update brand status");
+    }
+  };
+
+  const handleDelete = async (brand) => {
+    if (!window.confirm(`Permanently delete brand "${brand.name}"? This cannot be undone.`)) return;
+    try {
+      setError("");
+      await API.delete(`/api/brands/${brand.id}`);
+      fetchBrands();
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to delete brand");
     }
   };
 
@@ -279,6 +294,7 @@ export default function Brands() {
           .edit-btn, .delete-btn { width: 36px; height: 36px; border-radius: 12px; border: none; display: flex; align-items: center; justify-content: center; cursor: pointer; }
           .edit-btn { background: #fff4ee; color: #E8773A; }
           .delete-btn { background: #fff1f1; color: #d63636; }
+          .activate-btn { width: 36px; height: 36px; border-radius: 12px; border: none; display: flex; align-items: center; justify-content: center; cursor: pointer; background: #effbf4; color: #1c9b58; }
           .empty-box { min-height: 180px; border: 1px dashed #ddd; border-radius: 20px; background: #fafafa; display: flex; align-items: center; justify-content: center; text-align: center; padding: 28px; }
           .empty-box h3 { margin: 0; font-size: 18px; font-weight: 950; }
           .empty-box p { margin: 8px 0 0; color: #777; font-size: 13px; }
@@ -287,7 +303,7 @@ export default function Brands() {
 
         <div className="brand-hero"><div className="hero-left"><div className="hero-icon"><BadgeCheck size={28} /></div><div><h1>Product Brands</h1><p>Manage own brands and supplier brands. These brands will be used inside product creation.</p></div></div><div className="hero-actions"><button className="secondary-btn" onClick={fetchBrands}><RefreshCw size={17} />Refresh</button><button className="primary-btn" onClick={() => setShowForm(true)}><Plus size={18} />Add Brand</button></div></div>
 
-        <div className="stats-grid"><div className="stat-card"><h3>{brands.length}</h3><p>Total Brands</p></div><div className="stat-card"><h3>{brands.filter((b) => b.status === "active").length}</h3><p>Active Brands</p></div><div className="stat-card"><h3>{brands.filter((b) => b.status === "inactive").length}</h3><p>Inactive Brands</p></div></div>
+        <div className="stats-grid"><div className="stat-card"><h3>{Number(summary.total_brands) || brands.length}</h3><p>Total Brands</p></div><div className="stat-card"><h3>{Number(summary.active_brands) || brands.filter((b) => b.status === "active").length}</h3><p>Active Brands</p></div><div className="stat-card"><h3>{Number(summary.inactive_brands) || brands.filter((b) => b.status === "inactive").length}</h3><p>Inactive Brands</p></div></div>
 
         {error && <div className="error-box">{error}</div>}
 
@@ -295,7 +311,7 @@ export default function Brands() {
 
         <div className="toolbar"><div className="search-wrap"><Search size={17} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search brand name, slug or status..." /></div><select className="filter-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}><option value="active">Active Brands</option><option value="inactive">Inactive Brands</option><option value="all">All Brands</option></select><div>Showing <strong>{filteredBrands.length}</strong> brands</div></div>
 
-        <div className="table-card"><div className="table-header"><h2>Brand List</h2><p>Product brand records from MySQL database</p></div>{loading ? (<div className="empty-box"><div><h3>Loading brands...</h3><p>Please wait while brand records are loading.</p></div></div>) : filteredBrands.length === 0 ? (<div className="empty-box"><div><h3>No brands found</h3><p>Click Add Brand to create your first product brand.</p></div></div>) : (<div className="table-wrap"><table><thead><tr><th>Logo</th><th>Brand</th><th>Description</th><th>Status</th><th>Action</th></tr></thead><tbody>{filteredBrands.map((brand) => (<tr key={brand.id}><td>{brand.logo ? (<img src={getImageUrl(brand.logo)} alt={brand.name} className="brand-logo" />) : (<div className="logo-placeholder"><BadgeCheck size={20} /></div>)}</td><td><div className="brand-name">{brand.name}</div><div className="slug-text">/{brand.slug}</div></td><td>{brand.description || "-"}</td><td><span className={`status-badge ${brand.status}`}>{brand.status}</span></td><td><div className="action-buttons"><button className="edit-btn" onClick={() => handleEdit(brand)}><Edit3 size={16} /></button>{brand.status === "active" ? (<button className="delete-btn" onClick={() => handleDeactivate(brand.id)}><Trash2 size={16} /></button>) : (<span>Deactivated</span>)}</div></td></tr>))}</tbody></table></div>)}</div>
+        <div className="table-card"><div className="table-header"><h2>Brand List</h2><p>Product brand records from MySQL database</p></div>{loading ? (<div className="empty-box"><div><h3>Loading brands...</h3><p>Please wait while brand records are loading.</p></div></div>) : filteredBrands.length === 0 ? (<div className="empty-box"><div><h3>No brands found</h3><p>Click Add Brand to create your first product brand.</p></div></div>) : (<div className="table-wrap"><table><thead><tr><th>Logo</th><th>Brand</th><th>Description</th><th>Status</th><th>Action</th></tr></thead><tbody>{filteredBrands.map((brand) => (<tr key={brand.id}><td>{brand.logo ? (<img src={getImageUrl(brand.logo)} alt={brand.name} className="brand-logo" />) : (<div className="logo-placeholder"><BadgeCheck size={20} /></div>)}</td><td><div className="brand-name">{brand.name}</div><div className="slug-text">/{brand.slug}</div></td><td>{brand.description || "-"}</td><td><span className={`status-badge ${brand.status}`}>{brand.status}</span></td><td><div className="action-buttons"><button className="edit-btn" onClick={() => handleEdit(brand)} title="Edit"><Edit3 size={16} /></button><button className={brand.status === "active" ? "delete-btn" : "activate-btn"} onClick={() => handleToggleStatus(brand)} title={brand.status === "active" ? "Deactivate" : "Activate"} style={{fontSize:'11px',fontWeight:700,width:'auto',padding:'0 10px'}}>{brand.status === "active" ? "Deactivate" : "Activate"}</button><button className="delete-btn" onClick={() => handleDelete(brand)} title="Delete permanently"><Trash2 size={16} /></button></div></td></tr>))}</tbody></table></div>)}</div>
       </div>
     </AdminLayout>
   );

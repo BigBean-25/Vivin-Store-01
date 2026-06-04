@@ -42,8 +42,6 @@ const initialForm = {
 const statusOptions = [
   { value: "active", label: "Active" },
   { value: "inactive", label: "Inactive" },
-  { value: "draft", label: "Draft" },
-  { value: "out_of_stock", label: "Out of Stock" },
 ];
 
 const formatCurrency = (value) => {
@@ -277,6 +275,19 @@ export default function ProductVariants() {
       setError(err.response?.data?.message || "Failed to save product variant");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleToggleStatus = async (variant) => {
+    const newStatus = variant.status === "active" ? "inactive" : "active";
+    if (!window.confirm(`${newStatus === "inactive" ? "Deactivate" : "Activate"} variant "${variant.variant_name || `#${variant.id}`}"?`)) return;
+    try {
+      setError("");
+      await API.patch(`/api/product-variants/${variant.id}/status`, { status: newStatus });
+      showSuccess(`Variant ${newStatus} successfully`);
+      fetchProductVariants();
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to update variant status");
     }
   };
 
@@ -759,9 +770,18 @@ export default function ProductVariants() {
 
                             <button
                               type="button"
+                              onClick={() => handleToggleStatus(variant)}
+                              title={variant.status === "active" ? "Deactivate" : "Activate"}
+                              style={{height:'37px',padding:'0 10px',borderRadius:'13px',border:'none',cursor:'pointer',fontWeight:700,fontSize:'11px',background:variant.status==="active"?'#fff1f2':'#ecfdf5',color:variant.status==="active"?'#e11d48':'#047857'}}
+                            >
+                              {variant.status === "active" ? "Deactivate" : "Activate"}
+                            </button>
+
+                            <button
+                              type="button"
                               className="delete-btn"
                               onClick={() => handleDelete(variant)}
-                              title="Delete"
+                              title="Delete permanently"
                             >
                               <Trash2 size={16} />
                             </button>

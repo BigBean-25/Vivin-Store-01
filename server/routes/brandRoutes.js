@@ -4,11 +4,13 @@ const path = require("path");
 const fs = require("fs");
 
 const {
+  getBrandSummary,
   getBrands,
   getActiveBrands,
   createBrand,
   getBrandById,
   updateBrand,
+  updateBrandStatus,
   deleteBrand,
 } = require("../controllers/brandController");
 
@@ -57,11 +59,13 @@ const upload = multer({
   },
 });
 
-router.get("/", protect, getBrands);
+router.get("/summary", protect, getBrandSummary);
 router.get("/active/list", protect, getActiveBrands);
+router.get("/", protect, getBrands);
 router.post("/", protect, upload.single("logo"), createBrand);
 router.get("/:id", protect, getBrandById);
 router.put("/:id", protect, upload.single("logo"), updateBrand);
+router.patch("/:id/status", protect, updateBrandStatus);
 router.delete("/:id", protect, deleteBrand);
 
 module.exports = router;

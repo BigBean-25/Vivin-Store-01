@@ -16,16 +16,8 @@ const toNumber = (value, fallback = 0) => {
 };
 
 const normalizeStatus = (value) => {
-  if (
-    value === "pending" ||
-    value === "approved" ||
-    value === "rejected" ||
-    value === "inactive"
-  ) {
-    return value;
-  }
-
-  return "active";
+  if (value === "approved" || value === "rejected") return value;
+  return "pending";
 };
 
 const normalizeBoolean = (value) => {
@@ -275,6 +267,23 @@ const buildUpdate = (meta, payload) => {
   return { sets, values };
 };
 
+exports.getProductReviewSummary = async (req, res) => {
+  try {
+    const [[summary]] = await db.query(`
+      SELECT
+        COUNT(id) AS total_reviews,
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_reviews,
+        SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) AS approved_reviews,
+        SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) AS rejected_reviews,
+        ROUND(AVG(rating), 2) AS average_rating
+      FROM product_reviews
+    `);
+    res.json({ success: true, summary });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to fetch review summary", error: error.message });
+  }
+};
+
 exports.getProductReviews = async (req, res) => {
   try {
     const {
@@ -445,7 +454,7 @@ exports.createProductReview = async (req, res) => {
       review = "",
       review_date = "",
       is_approved = 0,
-      status = "active",
+      status = "pending",
     } = req.body;
 
     const meta = await getMeta();
@@ -575,7 +584,7 @@ exports.updateProductReview = async (req, res) => {
       review = "",
       review_date = "",
       is_approved = 0,
-      status = "active",
+      status = "pending",
     } = req.body;
 
     const meta = await getMeta();
@@ -703,6 +712,27 @@ exports.updateProductReview = async (req, res) => {
       message: "Failed to update product review",
       error: error.message,
     });
+  }
+};
+
+exports.updateProductReviewStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!['pending', 'approved', 'rejected'].includes(status)) {
+      return res.status(400).json({ success: false, message: "Status must be pending, approved, or rejected" });
+    }
+
+    const [result] = await db.query(`UPDATE product_reviews SET status = ? WHERE id = ?`, [status, id]);
+
+    if (!result.affectedRows) {
+      return res.status(404).json({ success: false, message: "Product review not found" });
+    }
+
+    res.json({ success: true, message: `Review ${status} successfully` });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to update review status", error: error.message });
   }
 };
 

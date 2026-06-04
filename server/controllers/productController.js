@@ -18,6 +18,22 @@ const toBool = (value, defaultValue = true) => {
     : 0;
 };
 
+exports.getProductSummary = async (req, res) => {
+  try {
+    const [[summary]] = await db.query(`
+      SELECT
+        COUNT(id) AS total_products,
+        SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active_products,
+        SUM(CASE WHEN status = 'inactive' THEN 1 ELSE 0 END) AS inactive_products,
+        COALESCE(SUM(base_price), 0) AS total_base_value
+      FROM products
+    `);
+    res.json({ success: true, summary });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to fetch product summary", error: error.message });
+  }
+};
+
 exports.getProducts = async (req, res) => {
   try {
     const [products] = await db.query(`
@@ -423,37 +439,62 @@ exports.updateProduct = async (req, res) => {
   }
 };
 
+exports.updateProductStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!['active', 'inactive', 'draft'].includes(status)) {
+      return res.status(400).json({ success: false, message: "Status must be active, inactive or draft" });
+    }
+
+    const [result] = await db.query(`UPDATE products SET status = ? WHERE id = ?`, [status, id]);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: "Product not found" });
+    }
+
+    res.json({ success: true, message: `Product ${status} successfully` });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to update product status", error: error.message });
+  }
+};
+
 exports.deleteProduct = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const [result] = await db.query(
-      `
-      UPDATE products
-      SET status = 'inactive'
-      WHERE id = ?
-      `,
-      [id]
-    );
+    const usageChecks = await Promise.all([
+      db.query(`SELECT COUNT(id) AS cnt FROM inventories WHERE product_id = ? LIMIT 1`, [id]),
+      db.query(`SELECT COUNT(id) AS cnt FROM stock_movements WHERE product_id = ? LIMIT 1`, [id]),
+      db.query(`SELECT COUNT(id) AS cnt FROM rfq_items WHERE product_id = ? LIMIT 1`, [id]),
+      db.query(`SELECT COUNT(id) AS cnt FROM purchase_order_items WHERE product_id = ? LIMIT 1`, [id]),
+      db.query(`SELECT COUNT(id) AS cnt FROM goods_receipt_items WHERE product_id = ? LIMIT 1`, [id]),
+      db.query(`SELECT COUNT(id) AS cnt FROM stock_inward_items WHERE product_id = ? LIMIT 1`, [id]),
+      db.query(`SELECT COUNT(id) AS cnt FROM stock_outward_items WHERE product_id = ? LIMIT 1`, [id]),
+    ]);
 
-    if (result.affectedRows === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Product not found",
-      });
+    const usageLabels = ['inventory', 'stock movements', 'RFQs', 'purchase orders', 'goods receipts', 'stock inward', 'stock outward'];
+    for (let i = 0; i < usageChecks.length; i++) {
+      const cnt = usageChecks[i][0][0].cnt;
+      if (cnt > 0) {
+        return res.status(409).json({
+          success: false,
+          message: `Cannot delete — product is used in ${usageLabels[i]} (${cnt} record(s)). Deactivate it instead.`,
+        });
+      }
     }
 
-    res.json({
-      success: true,
-      message: "Product deactivated successfully",
-    });
+    const [[product]] = await db.query(`SELECT id FROM products WHERE id = ? LIMIT 1`, [id]);
+    if (!product) {
+      return res.status(404).json({ success: false, message: "Product not found" });
+    }
+
+    await db.query(`DELETE FROM products WHERE id = ?`, [id]);
+
+    res.json({ success: true, message: "Product deleted successfully" });
   } catch (error) {
     console.error("Delete product error:", error);
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to deactivate product",
-      error: error.message,
-    });
+    res.status(500).json({ success: false, message: "Failed to delete product", error: error.message });
   }
 };

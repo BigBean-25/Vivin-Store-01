@@ -45,9 +45,12 @@ exports.getInventoryBatches = async (req, res) => {
       params.push(status);
     }
 
-    if (expiry_status) {
-      where.push("ie.status = ?");
-      params.push(expiry_status);
+    if (expiry_status === "expired") {
+      where.push("ib.expiry_date IS NOT NULL AND ib.expiry_date < CURDATE()");
+    } else if (expiry_status === "near_expiry") {
+      where.push("ib.expiry_date IS NOT NULL AND DATEDIFF(ib.expiry_date, CURDATE()) BETWEEN 0 AND 30");
+    } else if (expiry_status === "normal") {
+      where.push("(ib.expiry_date IS NULL OR DATEDIFF(ib.expiry_date, CURDATE()) > 30)");
     }
 
     if (search) {
@@ -79,7 +82,6 @@ exports.getInventoryBatches = async (req, res) => {
         p.name AS product_name,
         p.product_code,
         p.sku,
-        u.short_name AS unit_name,
         ib.batch_no,
         ib.manufacture_date,
         ib.expiry_date,
@@ -87,20 +89,20 @@ exports.getInventoryBatches = async (req, res) => {
         ib.cost_price,
         (ib.quantity * ib.cost_price) AS stock_value,
         ib.status AS batch_status,
-        ie.status AS expiry_status,
-        ie.alert_date,
         ib.created_at,
-
         CASE
           WHEN ib.expiry_date IS NULL THEN NULL
           ELSE DATEDIFF(ib.expiry_date, CURDATE())
-        END AS days_to_expiry
-
+        END AS days_to_expiry,
+        CASE
+          WHEN ib.expiry_date IS NULL THEN 'no_expiry'
+          WHEN ib.expiry_date < CURDATE() THEN 'expired'
+          WHEN DATEDIFF(ib.expiry_date, CURDATE()) <= 30 THEN 'near_expiry'
+          ELSE 'normal'
+        END AS expiry_status
       FROM inventory_batches ib
       LEFT JOIN warehouses w ON w.id = ib.warehouse_id
       LEFT JOIN products p ON p.id = ib.product_id
-      LEFT JOIN units u ON u.id = p.unit_id
-      LEFT JOIN inventory_expiry ie ON ie.batch_id = ib.id
       ${whereSql}
       ORDER BY
         CASE
@@ -148,11 +150,11 @@ exports.getInventoryBatchSummary = async (req, res) => {
     const [[expirySummary]] = await db.query(
       `
       SELECT
-        SUM(CASE WHEN status = 'normal' THEN 1 ELSE 0 END) AS normal_count,
-        SUM(CASE WHEN status = 'near_expiry' THEN 1 ELSE 0 END) AS near_expiry_count,
-        SUM(CASE WHEN status = 'expired' THEN 1 ELSE 0 END) AS expired_count,
-        SUM(CASE WHEN status = 'disposed' THEN 1 ELSE 0 END) AS disposed_count
-      FROM inventory_expiry
+        SUM(CASE WHEN expiry_date IS NULL THEN 1 ELSE 0 END) AS no_expiry_count,
+        SUM(CASE WHEN expiry_date IS NOT NULL AND expiry_date >= CURDATE() AND DATEDIFF(expiry_date, CURDATE()) > 30 THEN 1 ELSE 0 END) AS normal_count,
+        SUM(CASE WHEN expiry_date IS NOT NULL AND DATEDIFF(expiry_date, CURDATE()) BETWEEN 0 AND 30 THEN 1 ELSE 0 END) AS near_expiry_count,
+        SUM(CASE WHEN expiry_date IS NOT NULL AND expiry_date < CURDATE() THEN 1 ELSE 0 END) AS expired_count
+      FROM inventory_batches
       `
     );
 
@@ -203,18 +205,15 @@ exports.getNearExpiryBatches = async (req, res) => {
         p.name AS product_name,
         p.product_code,
         p.sku,
-        u.short_name AS unit_name,
         ib.batch_no,
         ib.expiry_date,
         ib.quantity,
         ib.cost_price,
         DATEDIFF(ib.expiry_date, CURDATE()) AS days_to_expiry,
-        ie.status AS expiry_status
+        'near_expiry' AS expiry_status
       FROM inventory_batches ib
       LEFT JOIN warehouses w ON w.id = ib.warehouse_id
       LEFT JOIN products p ON p.id = ib.product_id
-      LEFT JOIN units u ON u.id = p.unit_id
-      LEFT JOIN inventory_expiry ie ON ie.batch_id = ib.id
       WHERE ${where.join(" AND ")}
       ORDER BY ib.expiry_date ASC
       `,
@@ -265,18 +264,15 @@ exports.getExpiredBatches = async (req, res) => {
         p.name AS product_name,
         p.product_code,
         p.sku,
-        u.short_name AS unit_name,
         ib.batch_no,
         ib.expiry_date,
         ib.quantity,
         ib.cost_price,
         DATEDIFF(CURDATE(), ib.expiry_date) AS expired_days,
-        ie.status AS expiry_status
+        'expired' AS expiry_status
       FROM inventory_batches ib
       LEFT JOIN warehouses w ON w.id = ib.warehouse_id
       LEFT JOIN products p ON p.id = ib.product_id
-      LEFT JOIN units u ON u.id = p.unit_id
-      LEFT JOIN inventory_expiry ie ON ie.batch_id = ib.id
       WHERE ${where.join(" AND ")}
       ORDER BY ib.expiry_date ASC
       `,
@@ -312,14 +308,19 @@ exports.getInventoryBatchById = async (req, res) => {
         p.name AS product_name,
         p.product_code,
         p.sku,
-        u.short_name AS unit_name,
-        ie.alert_date,
-        ie.status AS expiry_status
+        CASE
+          WHEN ib.expiry_date IS NULL THEN 'no_expiry'
+          WHEN ib.expiry_date < CURDATE() THEN 'expired'
+          WHEN DATEDIFF(ib.expiry_date, CURDATE()) <= 30 THEN 'near_expiry'
+          ELSE 'normal'
+        END AS expiry_status,
+        CASE
+          WHEN ib.expiry_date IS NULL THEN NULL
+          ELSE DATEDIFF(ib.expiry_date, CURDATE())
+        END AS days_to_expiry
       FROM inventory_batches ib
       LEFT JOIN warehouses w ON w.id = ib.warehouse_id
       LEFT JOIN products p ON p.id = ib.product_id
-      LEFT JOIN units u ON u.id = p.unit_id
-      LEFT JOIN inventory_expiry ie ON ie.batch_id = ib.id
       WHERE ib.id = ?
       LIMIT 1
       `,
@@ -368,6 +369,59 @@ exports.getInventoryBatchById = async (req, res) => {
   }
 };
 
+exports.createInventoryBatch = async (req, res) => {
+  try {
+    const { warehouse_id, product_id, batch_no, manufacture_date, expiry_date, quantity, cost_price, status = "active" } = req.body;
+
+    if (!warehouse_id || !product_id || !batch_no) {
+      return res.status(400).json({ success: false, message: "Warehouse, product and batch number are required" });
+    }
+
+    const [result] = await db.query(
+      `INSERT INTO inventory_batches (warehouse_id, product_id, batch_no, manufacture_date, expiry_date, quantity, cost_price, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        warehouse_id,
+        product_id,
+        batch_no,
+        cleanValue(manufacture_date),
+        cleanValue(expiry_date),
+        Number(quantity || 0),
+        Number(cost_price || 0),
+        status,
+      ]
+    );
+
+    res.status(201).json({ success: true, message: "Inventory batch created successfully", id: result.insertId });
+  } catch (error) {
+    console.error("Create inventory batch error:", error);
+    res.status(500).json({ success: false, message: "Failed to create inventory batch", error: error.message });
+  }
+};
+
+exports.deleteInventoryBatch = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [[batch]] = await db.query(`SELECT id, status FROM inventory_batches WHERE id = ? LIMIT 1`, [id]);
+
+    if (!batch) {
+      return res.status(404).json({ success: false, message: "Inventory batch not found" });
+    }
+
+    if (batch.status === "active" ) {
+      return res.status(400).json({ success: false, message: "Cannot delete an active batch. Change status first." });
+    }
+
+    await db.query(`DELETE FROM inventory_batches WHERE id = ?`, [id]);
+
+    res.json({ success: true, message: "Inventory batch deleted successfully" });
+  } catch (error) {
+    console.error("Delete inventory batch error:", error);
+    res.status(500).json({ success: false, message: "Failed to delete inventory batch", error: error.message });
+  }
+};
+
 exports.updateInventoryBatch = async (req, res) => {
   try {
     const { id } = req.params;
@@ -412,52 +466,6 @@ exports.updateInventoryBatch = async (req, res) => {
         id,
       ]
     );
-
-    if (expiry_date) {
-      const expiryStatus = getBatchStatusByExpiry(expiry_date);
-      const alertDate = new Date(expiry_date);
-      alertDate.setDate(alertDate.getDate() - 30);
-
-      const [[expiryRow]] = await db.query(
-        `SELECT id FROM inventory_expiry WHERE batch_id = ? LIMIT 1`,
-        [id]
-      );
-
-      if (expiryRow) {
-        await db.query(
-          `
-          UPDATE inventory_expiry
-          SET
-            expiry_date = ?,
-            alert_date = ?,
-            status = ?
-          WHERE batch_id = ?
-          `,
-          [
-            expiry_date,
-            alertDate.toISOString().slice(0, 10),
-            expiryStatus,
-            id,
-          ]
-        );
-      } else {
-        await db.query(
-          `
-          INSERT INTO inventory_expiry
-            (batch_id, product_id, warehouse_id, expiry_date, alert_date, status)
-          VALUES (?, ?, ?, ?, ?, ?)
-          `,
-          [
-            id,
-            batch.product_id,
-            batch.warehouse_id,
-            expiry_date,
-            alertDate.toISOString().slice(0, 10),
-            expiryStatus,
-          ]
-        );
-      }
-    }
 
     res.json({
       success: true,
@@ -555,48 +563,24 @@ exports.disposeExpiredBatch = async (req, res) => {
       });
     }
 
-    const [[inventory]] = await connection.query(
-      `
-      SELECT id, available_qty
-      FROM inventories
-      WHERE warehouse_id = ?
-        AND product_id = ?
-        AND variant_id IS NULL
-      LIMIT 1
-      `,
+    const [[outletStock]] = await connection.query(
+      `SELECT id, available_qty FROM outlet_stock WHERE outlet_id = ? AND product_id = ? LIMIT 1`,
       [batch.warehouse_id, batch.product_id]
     );
 
     const batchQty = Number(batch.quantity || 0);
-    const currentAvailableQty = Number(inventory?.available_qty || 0);
+    const currentAvailableQty = Number(outletStock?.available_qty || 0);
     const balanceAfter = Math.max(currentAvailableQty - batchQty, 0);
 
-    if (inventory) {
+    if (outletStock) {
       await connection.query(
-        `
-        UPDATE inventories
-        SET available_qty = ?
-        WHERE id = ?
-        `,
-        [balanceAfter, inventory.id]
+        `UPDATE outlet_stock SET available_qty = ?, updated_at = NOW() WHERE id = ?`,
+        [balanceAfter, outletStock.id]
       );
     }
 
     await connection.query(
-      `
-      UPDATE inventory_batches
-      SET quantity = 0, status = 'consumed'
-      WHERE id = ?
-      `,
-      [id]
-    );
-
-    await connection.query(
-      `
-      UPDATE inventory_expiry
-      SET status = 'disposed'
-      WHERE batch_id = ?
-      `,
+      `UPDATE inventory_batches SET quantity = 0, status = 'consumed' WHERE id = ?`,
       [id]
     );
 

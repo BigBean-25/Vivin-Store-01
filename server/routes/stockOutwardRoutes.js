@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 
 const {
+  getStockOutwardSummary,
   getStockOutwards,
   getStockOutwardById,
   createStockOutward,
@@ -13,6 +14,7 @@ const {
 
 const { protect } = require("../middleware/authMiddleware");
 
+router.get("/summary", protect, getStockOutwardSummary);
 router.get("/", protect, getStockOutwards);
 router.post("/", protect, createStockOutward);
 router.get("/:id", protect, getStockOutwardById);

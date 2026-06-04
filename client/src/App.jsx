@@ -53,6 +53,11 @@ import ProcurementDashboard from "./pages/super-admin/ProcurementDashboard";
 import ProcurementReports from "./pages/super-admin/ProcurementReports";
 
 import Warehouses from "./pages/super-admin/Warehouses";
+import WarehouseZones from "./pages/super-admin/WarehouseZones";
+import WarehouseRacks from "./pages/super-admin/WarehouseRacks";
+import WarehouseBins from "./pages/super-admin/WarehouseBins";
+import WarehouseStaff from "./pages/super-admin/WarehouseStaff";
+import WarehouseStockReports from "./pages/super-admin/WarehouseStockReports";
 import Inventory from "./pages/super-admin/Inventory";
 import InventoryBatches from "./pages/super-admin/InventoryBatches";
 import InventoryAlerts from "./pages/super-admin/InventoryAlerts";
@@ -576,6 +581,51 @@ export default function App() {
           element={
             <ProtectedRoute>
               <Warehouses />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/super-admin/warehouse-zones"
+          element={
+            <ProtectedRoute>
+              <WarehouseZones />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/super-admin/warehouse-racks"
+          element={
+            <ProtectedRoute>
+              <WarehouseRacks />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/super-admin/warehouse-bins"
+          element={
+            <ProtectedRoute>
+              <WarehouseBins />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/super-admin/warehouse-staff"
+          element={
+            <ProtectedRoute>
+              <WarehouseStaff />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/super-admin/warehouse-stock"
+          element={
+            <ProtectedRoute>
+              <WarehouseStockReports />
             </ProtectedRoute>
           }
         />

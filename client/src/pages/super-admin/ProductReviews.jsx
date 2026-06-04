@@ -29,15 +29,13 @@ const initialForm = {
   review: "",
   review_date: "",
   is_approved: "0",
-  status: "active",
+  status: "pending",
 };
 
 const statusOptions = [
-  { value: "active", label: "Active" },
   { value: "pending", label: "Pending" },
   { value: "approved", label: "Approved" },
   { value: "rejected", label: "Rejected" },
-  { value: "inactive", label: "Inactive" },
 ];
 
 const approvalOptions = [
@@ -365,6 +363,19 @@ export default function ProductReviews() {
       setError(err.response?.data?.message || "Failed to save product review");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleUpdateStatus = async (item, newStatus) => {
+    const label = newStatus === "approved" ? "Approve" : newStatus === "rejected" ? "Reject" : "Reset to Pending";
+    if (!window.confirm(`${label} review for "${item.product_name || `#${item.id}`}"?`)) return;
+    try {
+      setError("");
+      await API.patch(`/api/product-reviews/${item.id}/status`, { status: newStatus });
+      showSuccess(`Review ${newStatus} successfully`);
+      fetchProductReviews();
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to update review status");
     }
   };
 
@@ -821,11 +832,33 @@ export default function ProductReviews() {
                             <Edit3 size={16} />
                           </button>
 
+                          {item.status !== "approved" && (
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateStatus(item, "approved")}
+                              title="Approve"
+                              style={{height:'37px',padding:'0 10px',borderRadius:'13px',border:'none',cursor:'pointer',fontWeight:700,fontSize:'11px',background:'#ecfdf5',color:'#047857'}}
+                            >
+                              Approve
+                            </button>
+                          )}
+
+                          {item.status !== "rejected" && (
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateStatus(item, "rejected")}
+                              title="Reject"
+                              style={{height:'37px',padding:'0 10px',borderRadius:'13px',border:'none',cursor:'pointer',fontWeight:700,fontSize:'11px',background:'#fff1f2',color:'#e11d48'}}
+                            >
+                              Reject
+                            </button>
+                          )}
+
                           <button
                             type="button"
                             className="delete-btn"
                             onClick={() => handleDelete(item)}
-                            title="Delete"
+                            title="Delete permanently"
                           >
                             <Trash2 size={16} />
                           </button>

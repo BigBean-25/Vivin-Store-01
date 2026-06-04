@@ -26,6 +26,22 @@ const deleteImageFile = (imagePath) => {
   }
 };
 
+exports.getSubCategorySummary = async (req, res) => {
+  try {
+    const [[summary]] = await db.query(`
+      SELECT
+        COUNT(sc.id) AS total_sub_categories,
+        SUM(CASE WHEN sc.status = 'active' THEN 1 ELSE 0 END) AS active_sub_categories,
+        SUM(CASE WHEN sc.status = 'inactive' THEN 1 ELSE 0 END) AS inactive_sub_categories,
+        COUNT(DISTINCT sc.category_id) AS categories_used
+      FROM sub_categories sc
+    `);
+    res.json({ success: true, summary });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to fetch sub category summary", error: error.message });
+  }
+};
+
 exports.getSubCategories = async (req, res) => {
   try {
     const [subCategories] = await db.query(`
@@ -338,35 +354,51 @@ exports.updateSubCategory = async (req, res) => {
   }
 };
 
+exports.updateSubCategoryStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!['active', 'inactive'].includes(status)) {
+      return res.status(400).json({ success: false, message: "Status must be active or inactive" });
+    }
+
+    const [result] = await db.query(`UPDATE sub_categories SET status = ? WHERE id = ?`, [status, id]);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: "Sub category not found" });
+    }
+
+    res.json({ success: true, message: `Sub category ${status} successfully` });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to update sub category status", error: error.message });
+  }
+};
+
 exports.deleteSubCategory = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const [result] = await db.query(
-      `
-      UPDATE sub_categories
-      SET status = 'inactive'
-      WHERE id = ?
-      `,
-      [id]
+    const [[productUsage]] = await db.query(
+      `SELECT COUNT(id) AS cnt FROM products WHERE sub_category_id = ? LIMIT 1`, [id]
     );
-
-    if (result.affectedRows === 0) {
-      return res.status(404).json({
+    if (productUsage.cnt > 0) {
+      return res.status(409).json({
         success: false,
-        message: "Sub category not found",
+        message: `Cannot delete — sub category is used by ${productUsage.cnt} product(s). Deactivate it instead.`,
       });
     }
 
-    res.json({
-      success: true,
-      message: "Sub category deactivated successfully",
-    });
+    const [[sc]] = await db.query(`SELECT image FROM sub_categories WHERE id = ? LIMIT 1`, [id]);
+    if (!sc) {
+      return res.status(404).json({ success: false, message: "Sub category not found" });
+    }
+
+    await db.query(`DELETE FROM sub_categories WHERE id = ?`, [id]);
+    if (sc.image) deleteImageFile(sc.image);
+
+    res.json({ success: true, message: "Sub category deleted successfully" });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to deactivate sub category",
-      error: error.message,
-    });
+    res.status(500).json({ success: false, message: "Failed to delete sub category", error: error.message });
   }
 };

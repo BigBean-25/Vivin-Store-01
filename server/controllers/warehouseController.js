@@ -4,6 +4,24 @@ const generateWarehouseCode = () => {
   return "WH-" + Date.now();
 };
 
+exports.getWarehouseSummary = async (req, res) => {
+  try {
+    const [[summary]] = await db.query(`
+      SELECT
+        COUNT(id) AS total_warehouses,
+        SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active_warehouses,
+        SUM(CASE WHEN status = 'inactive' THEN 1 ELSE 0 END) AS inactive_warehouses,
+        COUNT(DISTINCT NULLIF(city, '')) AS total_cities
+      FROM warehouses
+    `);
+
+    res.json({ success: true, summary });
+  } catch (error) {
+    console.error("Get warehouse summary error:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch warehouse summary", error: error.message });
+  }
+};
+
 exports.getWarehouses = async (req, res) => {
   try {
     const [warehouses] = await db.query(`
@@ -174,6 +192,31 @@ exports.getWarehouseById = async (req, res) => {
   }
 };
 
+exports.updateWarehouseStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!['active', 'inactive'].includes(status)) {
+      return res.status(400).json({ success: false, message: "Status must be active or inactive" });
+    }
+
+    const [result] = await db.query(
+      `UPDATE warehouses SET status = ? WHERE id = ?`,
+      [status, id]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: "Warehouse not found" });
+    }
+
+    res.json({ success: true, message: `Warehouse ${status} successfully` });
+  } catch (error) {
+    console.error("Update warehouse status error:", error);
+    res.status(500).json({ success: false, message: "Failed to update warehouse status", error: error.message });
+  }
+};
+
 exports.updateWarehouse = async (req, res) => {
   try {
     const { id } = req.params;
@@ -197,6 +240,17 @@ exports.updateWarehouse = async (req, res) => {
       });
     }
 
+    const [[existing]] = await db.query(
+      `SELECT warehouse_code FROM warehouses WHERE id = ? LIMIT 1`,
+      [id]
+    );
+
+    if (!existing) {
+      return res.status(404).json({ success: false, message: "Warehouse not found" });
+    }
+
+    const finalCode = warehouse_code || existing.warehouse_code || generateWarehouseCode();
+
     const [result] = await db.query(
       `
       UPDATE warehouses SET
@@ -212,7 +266,7 @@ exports.updateWarehouse = async (req, res) => {
       WHERE id = ?
       `,
       [
-        warehouse_code || generateWarehouseCode(),
+        finalCode,
         name,
         phone || null,
         email || null,

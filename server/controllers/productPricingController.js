@@ -15,10 +15,7 @@ const toNumber = (value, fallback = 0) => {
 };
 
 const normalizeStatus = (value) => {
-  if (value === "inactive" || value === "draft" || value === "expired") {
-    return value;
-  }
-
+  if (value === "inactive") return "inactive";
   return "active";
 };
 
@@ -27,7 +24,10 @@ const normalizePriceType = (value) => {
     "retail",
     "wholesale",
     "bulk",
+    "customer",
     "customer_group",
+    "group",
+    "vendor",
     "special",
     "offer",
   ];
@@ -273,6 +273,22 @@ const buildUpdate = (meta, payload) => {
   });
 
   return { sets, values };
+};
+
+exports.getProductPricingSummary = async (req, res) => {
+  try {
+    const [[summary]] = await db.query(`
+      SELECT
+        COUNT(id) AS total_pricing,
+        SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active_pricing,
+        SUM(CASE WHEN status = 'inactive' THEN 1 ELSE 0 END) AS inactive_pricing,
+        COUNT(DISTINCT product_id) AS products_with_pricing
+      FROM product_pricing
+    `);
+    res.json({ success: true, summary });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to fetch pricing summary", error: error.message });
+  }
 };
 
 exports.getProductPricing = async (req, res) => {
@@ -655,6 +671,27 @@ exports.updateProductPricing = async (req, res) => {
       message: "Failed to update product pricing",
       error: error.message,
     });
+  }
+};
+
+exports.updateProductPricingStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!['active', 'inactive'].includes(status)) {
+      return res.status(400).json({ success: false, message: "Status must be active or inactive" });
+    }
+
+    const [result] = await db.query(`UPDATE product_pricing SET status = ? WHERE id = ?`, [status, id]);
+
+    if (!result.affectedRows) {
+      return res.status(404).json({ success: false, message: "Product pricing not found" });
+    }
+
+    res.json({ success: true, message: `Product pricing ${status} successfully` });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to update pricing status", error: error.message });
   }
 };
 

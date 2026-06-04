@@ -1,5 +1,22 @@
 const db = require("../config/db");
 
+exports.getUnitSummary = async (req, res) => {
+  try {
+    const [[summary]] = await db.query(`
+      SELECT
+        COUNT(id) AS total_units,
+        SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active_units,
+        SUM(CASE WHEN status = 'inactive' THEN 1 ELSE 0 END) AS inactive_units,
+        SUM(CASE WHEN type = 'weight' THEN 1 ELSE 0 END) AS weight_units,
+        SUM(CASE WHEN type = 'count' THEN 1 ELSE 0 END) AS count_units
+      FROM units
+    `);
+    res.json({ success: true, summary });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to fetch unit summary", error: error.message });
+  }
+};
+
 exports.getUnits = async (req, res) => {
   try {
     const [units] = await db.query(`
@@ -223,37 +240,51 @@ exports.updateUnit = async (req, res) => {
   }
 };
 
+exports.updateUnitStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!['active', 'inactive'].includes(status)) {
+      return res.status(400).json({ success: false, message: "Status must be active or inactive" });
+    }
+
+    const [result] = await db.query(`UPDATE units SET status = ? WHERE id = ?`, [status, id]);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: "Unit not found" });
+    }
+
+    res.json({ success: true, message: `Unit ${status} successfully` });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to update unit status", error: error.message });
+  }
+};
+
 exports.deleteUnit = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const [result] = await db.query(
-      `
-      UPDATE units
-      SET status = 'inactive'
-      WHERE id = ?
-      `,
-      [id]
+    const [[productUsage]] = await db.query(
+      `SELECT COUNT(id) AS cnt FROM products WHERE unit_id = ? LIMIT 1`, [id]
     );
-
-    if (result.affectedRows === 0) {
-      return res.status(404).json({
+    if (productUsage.cnt > 0) {
+      return res.status(409).json({
         success: false,
-        message: "Unit not found",
+        message: `Cannot delete — unit is used by ${productUsage.cnt} product(s). Deactivate it instead.`,
       });
     }
 
-    res.json({
-      success: true,
-      message: "Unit deactivated successfully",
-    });
+    const [[unit]] = await db.query(`SELECT id FROM units WHERE id = ? LIMIT 1`, [id]);
+    if (!unit) {
+      return res.status(404).json({ success: false, message: "Unit not found" });
+    }
+
+    await db.query(`DELETE FROM units WHERE id = ?`, [id]);
+
+    res.json({ success: true, message: "Unit deleted successfully" });
   } catch (error) {
     console.error("Delete unit error:", error);
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to deactivate unit",
-      error: error.message,
-    });
+    res.status(500).json({ success: false, message: "Failed to delete unit", error: error.message });
   }
 };

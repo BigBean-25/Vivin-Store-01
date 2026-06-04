@@ -58,8 +58,6 @@ const discountTypeOptions = [
 const statusOptions = [
   { value: "active", label: "Active" },
   { value: "inactive", label: "Inactive" },
-  { value: "draft", label: "Draft" },
-  { value: "expired", label: "Expired" },
 ];
 
 const formatCurrency = (value) => {
@@ -378,6 +376,19 @@ export default function ProductPricing() {
       setError(err.response?.data?.message || "Failed to save product pricing");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleToggleStatus = async (item) => {
+    const newStatus = item.status === "active" ? "inactive" : "active";
+    if (!window.confirm(`${newStatus === "inactive" ? "Deactivate" : "Activate"} pricing for "${item.product_name || `#${item.id}`}"?`)) return;
+    try {
+      setError("");
+      await API.patch(`/api/product-pricing/${item.id}/status`, { status: newStatus });
+      showSuccess(`Pricing ${newStatus} successfully`);
+      fetchProductPricing();
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to update pricing status");
     }
   };
 
@@ -889,9 +900,18 @@ export default function ProductPricing() {
 
                           <button
                             type="button"
+                            onClick={() => handleToggleStatus(item)}
+                            title={item.status === "active" ? "Deactivate" : "Activate"}
+                            style={{height:'37px',padding:'0 10px',borderRadius:'13px',border:'none',cursor:'pointer',fontWeight:700,fontSize:'11px',background:item.status==="active"?'#fff1f2':'#ecfdf5',color:item.status==="active"?'#e11d48':'#047857'}}
+                          >
+                            {item.status === "active" ? "Deactivate" : "Activate"}
+                          </button>
+
+                          <button
+                            type="button"
                             className="delete-btn"
                             onClick={() => handleDelete(item)}
-                            title="Delete"
+                            title="Delete permanently"
                           >
                             <Trash2 size={16} />
                           </button>

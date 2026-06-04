@@ -581,6 +581,11 @@ const menuItems = [
     ],
   },
   { title: "Warehouses", path: "/super-admin/warehouse", icon: Warehouse, group: "SUPPLY CHAIN" },
+  { title: "Warehouse Zones", path: "/super-admin/warehouse-zones", icon: Layers3, group: "SUPPLY CHAIN" },
+  { title: "Warehouse Racks", path: "/super-admin/warehouse-racks", icon: Package, group: "SUPPLY CHAIN" },
+  { title: "Warehouse Bins", path: "/super-admin/warehouse-bins", icon: Package, group: "SUPPLY CHAIN" },
+  { title: "Warehouse Staff", path: "/super-admin/warehouse-staff", icon: Users, group: "SUPPLY CHAIN" },
+  { title: "Warehouse Stock", path: "/super-admin/warehouse-stock", icon: BarChart3, group: "SUPPLY CHAIN" },
   {
     title: "Inventory",
     icon: Package,

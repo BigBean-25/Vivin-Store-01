@@ -32,26 +32,20 @@ const reduceInventoryStock = async (
   userId
 ) => {
   const productId = item.product_id;
-  const batchId = cleanValue(item.batch_id);
+  let batchId = cleanValue(item.batch_id);
   const qty = toNumber(item.quantity);
 
-  const [[inventory]] = await connection.query(
-    `
-    SELECT id, available_qty
-    FROM inventories
-    WHERE warehouse_id = ?
-      AND product_id = ?
-      AND variant_id IS NULL
-    LIMIT 1
-    `,
+  // 1. Check outlet_stock availability
+  const [[outletStock]] = await connection.query(
+    `SELECT id, available_qty FROM outlet_stock WHERE outlet_id = ? AND product_id = ? LIMIT 1`,
     [warehouseId, productId]
   );
 
-  if (!inventory) {
-    throwError(400, `No inventory stock found for product ID ${productId}`);
+  if (!outletStock) {
+    throwError(400, `No stock found for product ID ${productId} in this warehouse`);
   }
 
-  const currentAvailableQty = toNumber(inventory.available_qty);
+  const currentAvailableQty = toNumber(outletStock.available_qty);
 
   if (currentAvailableQty < qty) {
     throwError(
@@ -60,88 +54,75 @@ const reduceInventoryStock = async (
     );
   }
 
+  // 2. Handle batch: use provided batch_id or auto-pick FIFO (earliest expiry first)
   if (batchId) {
     const [[batch]] = await connection.query(
-      `
-      SELECT id, quantity, status
-      FROM inventory_batches
-      WHERE id = ?
-        AND warehouse_id = ?
-        AND product_id = ?
-      LIMIT 1
-      `,
+      `SELECT id, quantity, status FROM inventory_batches WHERE id = ? AND warehouse_id = ? AND product_id = ? LIMIT 1`,
       [batchId, warehouseId, productId]
     );
 
-    if (!batch) {
-      throwError(400, `Batch not found for product ID ${productId}`);
-    }
-
-    if (batch.status !== "active") {
-      throwError(400, `Batch is not active for product ID ${productId}`);
-    }
-
-    const batchQty = toNumber(batch.quantity);
-
-    if (batchQty < qty) {
-      throwError(
-        400,
-        `Insufficient batch stock for product ID ${productId}. Batch Available: ${batchQty}, Required: ${qty}`
-      );
+    if (!batch) throwError(400, `Batch not found for product ID ${productId}`);
+    if (batch.status !== "active") throwError(400, `Batch is not active for product ID ${productId}`);
+    if (toNumber(batch.quantity) < qty) {
+      throwError(400, `Insufficient batch stock for product ID ${productId}. Batch Available: ${toNumber(batch.quantity)}, Required: ${qty}`);
     }
 
     await connection.query(
-      `
-      UPDATE inventory_batches
-      SET
-        quantity = quantity - ?,
-        status = CASE
-          WHEN quantity - ? <= 0 THEN 'consumed'
-          ELSE status
-        END
-      WHERE id = ?
-      `,
+      `UPDATE inventory_batches SET quantity = quantity - ?, status = CASE WHEN quantity - ? <= 0 THEN 'consumed' ELSE status END WHERE id = ?`,
       [qty, qty, batchId]
     );
+  } else {
+    // Auto-pick active batch using FIFO (earliest expiry_date first, then earliest created_at)
+    const [batches] = await connection.query(
+      `SELECT id, quantity FROM inventory_batches
+       WHERE warehouse_id = ? AND product_id = ? AND status = 'active' AND quantity > 0
+       ORDER BY ISNULL(expiry_date) ASC, expiry_date ASC, created_at ASC`,
+      [warehouseId, productId]
+    );
+
+    let remaining = qty;
+    for (const batch of batches) {
+      if (remaining <= 0) break;
+      const deduct = Math.min(toNumber(batch.quantity), remaining);
+      await connection.query(
+        `UPDATE inventory_batches SET quantity = quantity - ?, status = CASE WHEN quantity - ? <= 0 THEN 'consumed' ELSE status END WHERE id = ?`,
+        [deduct, deduct, batch.id]
+      );
+      remaining -= deduct;
+      if (!batchId) batchId = batch.id;
+    }
   }
 
+  // 3. Reduce outlet_stock
   const balanceAfter = currentAvailableQty - qty;
-
   await connection.query(
-    `
-    UPDATE inventories
-    SET available_qty = ?
-    WHERE id = ?
-    `,
-    [balanceAfter, inventory.id]
+    `UPDATE outlet_stock SET available_qty = ?, updated_at = NOW() WHERE id = ?`,
+    [balanceAfter, outletStock.id]
   );
 
+  // 4. Insert stock_movement with movement_type = 'out'
   await connection.query(
-    `
-    INSERT INTO stock_movements
-      (
-        warehouse_id,
-        product_id,
-        batch_id,
-        movement_type,
-        quantity,
-        reference_type,
-        reference_id,
-        balance_after,
-        created_by
-      )
-    VALUES (?, ?, ?, 'out', ?, 'stock_outward', ?, ?, ?)
-    `,
-    [
-      warehouseId,
-      productId,
-      batchId,
-      qty,
-      stockOutwardId,
-      balanceAfter,
-      userId,
-    ]
+    `INSERT INTO stock_movements (warehouse_id, product_id, batch_id, movement_type, quantity, reference_type, reference_id, balance_after, created_by)
+     VALUES (?, ?, ?, 'out', ?, 'stock_outward', ?, ?, ?)`,
+    [warehouseId, productId, batchId, qty, stockOutwardId, balanceAfter, userId]
   );
+};
+
+exports.getStockOutwardSummary = async (req, res) => {
+  try {
+    const [[summary]] = await db.query(`
+      SELECT
+        COUNT(*) AS total,
+        SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) AS draft,
+        SUM(CASE WHEN status = 'posted' THEN 1 ELSE 0 END) AS posted,
+        SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled
+      FROM stock_outward
+    `);
+    res.json({ success: true, summary });
+  } catch (error) {
+    console.error("Get stock outward summary error:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch summary", error: error.message });
+  }
 };
 
 exports.getStockOutwards = async (req, res) => {

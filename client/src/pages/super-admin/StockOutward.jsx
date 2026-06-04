@@ -113,7 +113,7 @@ export default function StockOutward() {
         params.append("warehouse_id", warehouseId);
       }
 
-      const res = await API.get(`/api/inventory?${params.toString()}`);
+      const res = await API.get(`/api/inventory/outlet-stock?${params.toString()}`);
 
       if (res.data.success) {
         setInventory(res.data.inventory || res.data.data || []);

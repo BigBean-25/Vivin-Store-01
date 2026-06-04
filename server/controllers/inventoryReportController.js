@@ -36,12 +36,12 @@ exports.getInventoryReports = async (req, res) => {
     }
 
     if (from_date) {
-      where.push("ir.report_date >= ?");
+      where.push("ir.from_date >= ?");
       params.push(from_date);
     }
 
     if (to_date) {
-      where.push("ir.report_date <= ?");
+      where.push("ir.to_date <= ?");
       params.push(to_date);
     }
 
@@ -50,7 +50,7 @@ exports.getInventoryReports = async (req, res) => {
         (
           w.name LIKE ?
           OR w.warehouse_code LIKE ?
-          OR ir.report_date LIKE ?
+          OR ir.report_type LIKE ?
         )
       `);
 
@@ -64,18 +64,22 @@ exports.getInventoryReports = async (req, res) => {
       `
       SELECT
         ir.id,
-        ir.report_date,
+        ir.report_type,
         ir.warehouse_id,
         w.name AS warehouse_name,
         w.warehouse_code,
-        ir.total_stock_value,
-        ir.low_stock_count,
-        ir.expiry_count,
-        ir.created_at
+        ir.from_date AS report_date,
+        ir.to_date,
+        ir.generated_by,
+        ir.file_url,
+        ir.created_at,
+        0 AS total_stock_value,
+        0 AS low_stock_count,
+        0 AS expiry_count
       FROM inventory_reports ir
       LEFT JOIN warehouses w ON w.id = ir.warehouse_id
       ${whereSql}
-      ORDER BY ir.report_date DESC, ir.id DESC
+      ORDER BY ir.id DESC
       `,
       params
     );
@@ -100,7 +104,7 @@ exports.getInventoryReportSummary = async (req, res) => {
   try {
     const { warehouse_id = "" } = req.query;
 
-    const inventoryWhere = warehouse_id ? "WHERE i.warehouse_id = ?" : "";
+    const inventoryWhere = warehouse_id ? "WHERE os.outlet_id = ?" : "";
     const inventoryParams = warehouse_id ? [warehouse_id] : [];
 
     const expiryWhere = warehouse_id
@@ -112,22 +116,22 @@ exports.getInventoryReportSummary = async (req, res) => {
     const [[stockSummary]] = await db.query(
       `
       SELECT
-        COUNT(DISTINCT i.product_id) AS total_products,
-        COUNT(DISTINCT i.warehouse_id) AS total_warehouses,
-        COALESCE(SUM(i.available_qty), 0) AS total_available_qty,
-        COALESCE(SUM(i.reserved_qty), 0) AS total_reserved_qty,
-        COALESCE(SUM(i.damaged_qty), 0) AS total_damaged_qty,
-        COALESCE(SUM(i.available_qty * i.average_cost), 0) AS total_stock_value,
+        COUNT(DISTINCT os.product_id) AS total_products,
+        COUNT(DISTINCT os.outlet_id) AS total_warehouses,
+        COALESCE(SUM(os.available_qty), 0) AS total_available_qty,
+        0 AS total_reserved_qty,
+        0 AS total_damaged_qty,
+        COALESCE(SUM(os.available_qty * COALESCE(p.purchase_price, 0)), 0) AS total_stock_value,
         SUM(
           CASE
             WHEN COALESCE(NULLIF(p.reorder_level, 0), NULLIF(p.min_stock_level, 0), 0) > 0
-             AND i.available_qty <= COALESCE(NULLIF(p.reorder_level, 0), NULLIF(p.min_stock_level, 0), 0)
+             AND os.available_qty <= COALESCE(NULLIF(p.reorder_level, 0), NULLIF(p.min_stock_level, 0), 0)
             THEN 1
             ELSE 0
           END
         ) AS low_stock_count
-      FROM inventories i
-      LEFT JOIN products p ON p.id = i.product_id
+      FROM outlet_stock os
+      LEFT JOIN products p ON p.id = os.product_id
       ${inventoryWhere}
       `,
       inventoryParams
@@ -188,7 +192,7 @@ exports.getLiveStockReport = async (req, res) => {
     const params = [];
 
     if (warehouse_id) {
-      where.push("i.warehouse_id = ?");
+      where.push("os.outlet_id = ?");
       params.push(warehouse_id);
     }
 
@@ -212,36 +216,34 @@ exports.getLiveStockReport = async (req, res) => {
     const [stock] = await db.query(
       `
       SELECT
-        i.id,
-        i.warehouse_id,
+        os.id,
+        os.outlet_id AS warehouse_id,
         w.name AS warehouse_name,
         w.warehouse_code,
-        i.product_id,
+        os.product_id,
         p.name AS product_name,
         p.product_code,
         p.sku,
-        u.short_name AS unit_name,
-        i.available_qty,
-        i.reserved_qty,
-        i.damaged_qty,
-        i.average_cost,
-        (i.available_qty * i.average_cost) AS stock_value,
+        os.available_qty,
+        0 AS reserved_qty,
+        0 AS damaged_qty,
+        p.purchase_price AS average_cost,
+        (os.available_qty * COALESCE(p.purchase_price, 0)) AS stock_value,
         p.min_stock_level,
         p.reorder_level,
         CASE
           WHEN COALESCE(NULLIF(p.min_stock_level, 0), 0) > 0
-           AND i.available_qty <= p.min_stock_level
+           AND os.available_qty <= p.min_stock_level
           THEN 'critical'
           WHEN COALESCE(NULLIF(p.reorder_level, 0), NULLIF(p.min_stock_level, 0), 0) > 0
-           AND i.available_qty <= COALESCE(NULLIF(p.reorder_level, 0), NULLIF(p.min_stock_level, 0), 0)
+           AND os.available_qty <= COALESCE(NULLIF(p.reorder_level, 0), NULLIF(p.min_stock_level, 0), 0)
           THEN 'low'
           ELSE 'normal'
         END AS stock_status,
-        i.updated_at
-      FROM inventories i
-      LEFT JOIN warehouses w ON w.id = i.warehouse_id
-      LEFT JOIN products p ON p.id = i.product_id
-      LEFT JOIN units u ON u.id = p.unit_id
+        os.updated_at
+      FROM outlet_stock os
+      LEFT JOIN warehouses w ON w.id = os.outlet_id
+      LEFT JOIN products p ON p.id = os.product_id
       ${whereSql}
       ORDER BY w.name ASC, p.name ASC
       `,
@@ -270,42 +272,38 @@ exports.getLowStockReport = async (req, res) => {
 
     const where = [
       "COALESCE(NULLIF(p.reorder_level, 0), NULLIF(p.min_stock_level, 0), 0) > 0",
-      "i.available_qty <= COALESCE(NULLIF(p.reorder_level, 0), NULLIF(p.min_stock_level, 0), 0)",
+      "os.available_qty <= COALESCE(NULLIF(p.reorder_level, 0), NULLIF(p.min_stock_level, 0), 0)",
     ];
 
     const params = [];
 
     if (warehouse_id) {
-      where.push("i.warehouse_id = ?");
+      where.push("os.outlet_id = ?");
       params.push(warehouse_id);
     }
 
     const [items] = await db.query(
       `
       SELECT
-        i.id,
-        i.warehouse_id,
+        os.id,
+        os.outlet_id AS warehouse_id,
         w.name AS warehouse_name,
         w.warehouse_code,
-        i.product_id,
+        os.product_id,
         p.name AS product_name,
         p.product_code,
         p.sku,
-        u.short_name AS unit_name,
-        i.available_qty,
-        i.reserved_qty,
-        i.damaged_qty,
-        i.average_cost,
-        (i.available_qty * i.average_cost) AS stock_value,
+        os.available_qty,
+        p.purchase_price AS average_cost,
+        (os.available_qty * COALESCE(p.purchase_price, 0)) AS stock_value,
         p.min_stock_level,
         p.reorder_level,
         COALESCE(NULLIF(p.reorder_level, 0), NULLIF(p.min_stock_level, 0), 0) AS alert_level
-      FROM inventories i
-      LEFT JOIN warehouses w ON w.id = i.warehouse_id
-      LEFT JOIN products p ON p.id = i.product_id
-      LEFT JOIN units u ON u.id = p.unit_id
+      FROM outlet_stock os
+      LEFT JOIN warehouses w ON w.id = os.outlet_id
+      LEFT JOIN products p ON p.id = os.product_id
       WHERE ${where.join(" AND ")}
-      ORDER BY i.available_qty ASC, p.name ASC
+      ORDER BY os.available_qty ASC, p.name ASC
       `,
       params
     );
@@ -368,7 +366,6 @@ exports.getExpiryReport = async (req, res) => {
         p.name AS product_name,
         p.product_code,
         p.sku,
-        u.short_name AS unit_name,
         ib.batch_no,
         ib.manufacture_date,
         ib.expiry_date,
@@ -385,7 +382,6 @@ exports.getExpiryReport = async (req, res) => {
       FROM inventory_batches ib
       LEFT JOIN warehouses w ON w.id = ib.warehouse_id
       LEFT JOIN products p ON p.id = ib.product_id
-      LEFT JOIN units u ON u.id = p.unit_id
       WHERE ${where.join(" AND ")}
       ORDER BY ib.expiry_date ASC
       `,
@@ -459,7 +455,6 @@ exports.getStockMovementReport = async (req, res) => {
         p.name AS product_name,
         p.product_code,
         p.sku,
-        u.short_name AS unit_name,
         sm.batch_id,
         ib.batch_no,
         sm.movement_type,
@@ -472,7 +467,6 @@ exports.getStockMovementReport = async (req, res) => {
       FROM stock_movements sm
       LEFT JOIN warehouses w ON w.id = sm.warehouse_id
       LEFT JOIN products p ON p.id = sm.product_id
-      LEFT JOIN units u ON u.id = p.unit_id
       LEFT JOIN inventory_batches ib ON ib.id = sm.batch_id
       ${whereSql}
       ORDER BY sm.id DESC
@@ -518,7 +512,7 @@ exports.generateInventoryReport = async (req, res) => {
     const reportDate = req.body.report_date || today();
     const warehouseId = cleanValue(req.body.warehouse_id);
 
-    const warehouseFilter = warehouseId ? "WHERE i.warehouse_id = ?" : "";
+    const warehouseFilter = warehouseId ? "WHERE os.outlet_id = ?" : "";
     const warehouseParams = warehouseId ? [warehouseId] : [];
 
     const batchFilter = warehouseId ? "AND ib.warehouse_id = ?" : "";
@@ -527,25 +521,21 @@ exports.generateInventoryReport = async (req, res) => {
     const [stockItems] = await db.query(
       `
       SELECT
-        i.warehouse_id,
+        os.outlet_id AS warehouse_id,
         w.name AS warehouse_name,
         w.warehouse_code,
-        i.product_id,
+        os.product_id,
         p.name AS product_name,
         p.product_code,
         p.sku,
-        u.short_name AS unit_name,
-        i.available_qty,
-        i.reserved_qty,
-        i.damaged_qty,
-        i.average_cost,
-        (i.available_qty * i.average_cost) AS stock_value,
+        os.available_qty,
+        p.purchase_price AS average_cost,
+        (os.available_qty * COALESCE(p.purchase_price, 0)) AS stock_value,
         p.min_stock_level,
         p.reorder_level
-      FROM inventories i
-      LEFT JOIN warehouses w ON w.id = i.warehouse_id
-      LEFT JOIN products p ON p.id = i.product_id
-      LEFT JOIN units u ON u.id = p.unit_id
+      FROM outlet_stock os
+      LEFT JOIN warehouses w ON w.id = os.outlet_id
+      LEFT JOIN products p ON p.id = os.product_id
       ${warehouseFilter}
       ORDER BY w.name ASC, p.name ASC
       `,
@@ -611,27 +601,11 @@ exports.generateInventoryReport = async (req, res) => {
       expiry_items: expiryItems,
     };
 
+    const userId = req.user?.id || req.user?.user_id || null;
+
     const [result] = await db.query(
-      `
-      INSERT INTO inventory_reports
-        (
-          report_date,
-          warehouse_id,
-          total_stock_value,
-          low_stock_count,
-          expiry_count,
-          data
-        )
-      VALUES (?, ?, ?, ?, ?, ?)
-      `,
-      [
-        reportDate,
-        warehouseId,
-        totalStockValue,
-        lowStockItems.length,
-        expiryItems.length,
-        JSON.stringify(data),
-      ]
+      `INSERT INTO inventory_reports (report_type, warehouse_id, from_date, to_date, generated_by) VALUES (?, ?, ?, ?, ?)`,
+      ['full_stock', warehouseId, reportDate, reportDate, userId]
     );
 
     res.status(201).json({
@@ -659,15 +633,18 @@ exports.getInventoryReportById = async (req, res) => {
       `
       SELECT
         ir.id,
-        ir.report_date,
+        ir.report_type,
         ir.warehouse_id,
         w.name AS warehouse_name,
         w.warehouse_code,
-        ir.total_stock_value,
-        ir.low_stock_count,
-        ir.expiry_count,
-        ir.data,
-        ir.created_at
+        ir.from_date AS report_date,
+        ir.to_date,
+        ir.generated_by,
+        ir.file_url,
+        ir.created_at,
+        0 AS total_stock_value,
+        0 AS low_stock_count,
+        0 AS expiry_count
       FROM inventory_reports ir
       LEFT JOIN warehouses w ON w.id = ir.warehouse_id
       WHERE ir.id = ?
@@ -697,6 +674,81 @@ exports.getInventoryReportById = async (req, res) => {
       message: "Failed to fetch inventory report",
       error: error.message,
     });
+  }
+};
+
+exports.getStockValuationReport = async (req, res) => {
+  return exports.getLiveStockReport(req, res);
+};
+
+exports.getBatchExpiryReport = async (req, res) => {
+  return exports.getExpiryReport(req, res);
+};
+
+exports.getInwardOutwardSummary = async (req, res) => {
+  try {
+    const { warehouse_id = "", from_date = "", to_date = "" } = req.query;
+
+    const baseWhere = [];
+    const baseParams = [];
+
+    if (warehouse_id) {
+      baseWhere.push("warehouse_id = ?");
+      baseParams.push(warehouse_id);
+    }
+
+    if (from_date) {
+      baseWhere.push("DATE(created_at) >= ?");
+      baseParams.push(from_date);
+    }
+
+    if (to_date) {
+      baseWhere.push("DATE(created_at) <= ?");
+      baseParams.push(to_date);
+    }
+
+    const whereClause = baseWhere.length ? `WHERE ${baseWhere.join(" AND ")}` : "";
+
+    const [[inward]] = await db.query(
+      `SELECT COUNT(si.id) AS total_inward,
+              COALESCE(SUM(sii.quantity), 0) AS total_inward_qty,
+              COALESCE(SUM(sii.quantity * sii.unit_cost), 0) AS total_inward_value
+       FROM stock_inward si
+       LEFT JOIN stock_inward_items sii ON sii.stock_inward_id = si.id
+       ${whereClause.replace(/warehouse_id/g, "si.warehouse_id").replace(/DATE\(created_at\)/g, "DATE(si.created_at)")}`,
+      baseParams
+    );
+
+    const [[outward]] = await db.query(
+      `SELECT COUNT(so.id) AS total_outward,
+              COALESCE(SUM(soi.quantity), 0) AS total_outward_qty,
+              COALESCE(SUM(soi.quantity * soi.unit_cost), 0) AS total_outward_value
+       FROM stock_outward so
+       LEFT JOIN stock_outward_items soi ON soi.stock_outward_id = so.id
+       ${whereClause.replace(/warehouse_id/g, "so.warehouse_id").replace(/DATE\(created_at\)/g, "DATE(so.created_at)")}`,
+      baseParams
+    );
+
+    const [[adjustment]] = await db.query(
+      `SELECT COUNT(sa.id) AS total_adjustments,
+              COALESCE(SUM(ABS(sai.difference_qty)), 0) AS total_adjustment_qty
+       FROM stock_adjustments sa
+       LEFT JOIN stock_adjustment_items sai ON sai.stock_adjustment_id = sa.id
+       ${whereClause.replace(/warehouse_id/g, "sa.warehouse_id").replace(/DATE\(created_at\)/g, "DATE(sa.created_at)")}`,
+      baseParams
+    );
+
+    res.json({
+      success: true,
+      summary: {
+        ...inward,
+        ...outward,
+        ...adjustment,
+      },
+    });
+  } catch (error) {
+    console.error("Get inward outward summary error:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch inward/outward summary", error: error.message });
   }
 };
 

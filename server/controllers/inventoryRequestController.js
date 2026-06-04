@@ -243,20 +243,17 @@ exports.getInventoryRequestById = async (req, res) => {
         p.name AS product_name,
         p.product_code,
         p.sku,
-        u.short_name AS unit_name,
         iri.requested_qty,
         iri.approved_qty,
         iri.issued_qty,
-        COALESCE(i.available_qty, 0) AS available_qty,
-        COALESCE(i.average_cost, 0) AS average_cost,
+        COALESCE(os.available_qty, 0) AS available_qty,
+        COALESCE(p.purchase_price, 0) AS average_cost,
         iri.created_at
       FROM inventory_request_items iri
       LEFT JOIN products p ON p.id = iri.product_id
-      LEFT JOIN units u ON u.id = p.unit_id
-      LEFT JOIN inventories i
-        ON i.product_id = iri.product_id
-        AND i.warehouse_id = ?
-        AND i.variant_id IS NULL
+      LEFT JOIN outlet_stock os
+        ON os.product_id = iri.product_id
+        AND os.outlet_id = ?
       WHERE iri.inventory_request_id = ?
       ORDER BY iri.id ASC
       `,
@@ -759,25 +756,16 @@ exports.fulfillInventoryRequest = async (req, res) => {
 
       if (issueQty <= 0) continue;
 
-      const [[fromInventory]] = await connection.query(
-        `
-        SELECT id, available_qty, average_cost
-        FROM inventories
-        WHERE warehouse_id = ?
-          AND product_id = ?
-          AND variant_id IS NULL
-        LIMIT 1
-        FOR UPDATE
-        `,
+      const [[fromStock]] = await connection.query(
+        `SELECT id, available_qty FROM outlet_stock WHERE outlet_id = ? AND product_id = ? LIMIT 1 FOR UPDATE`,
         [request.from_warehouse_id, dbItem.product_id]
       );
 
-      if (!fromInventory) {
+      if (!fromStock) {
         throw new Error(`Stock not found for ${dbItem.product_name || "product"}`);
       }
 
-      const currentQty = toNumber(fromInventory.available_qty);
-      const averageCost = toNumber(fromInventory.average_cost);
+      const currentQty = toNumber(fromStock.available_qty);
 
       if (currentQty < issueQty) {
         throw new Error(
@@ -788,124 +776,40 @@ exports.fulfillInventoryRequest = async (req, res) => {
       const fromBalanceAfter = currentQty - issueQty;
 
       await connection.query(
-        `
-        UPDATE inventories
-        SET available_qty = ?
-        WHERE id = ?
-        `,
-        [fromBalanceAfter, fromInventory.id]
+        `UPDATE outlet_stock SET available_qty = ?, updated_at = NOW() WHERE id = ?`,
+        [fromBalanceAfter, fromStock.id]
       );
 
       await connection.query(
-        `
-        INSERT INTO stock_movements
-          (
-            warehouse_id,
-            product_id,
-            batch_id,
-            movement_type,
-            quantity,
-            reference_type,
-            reference_id,
-            balance_after,
-            created_by
-          )
-        VALUES (?, ?, NULL, 'out', ?, 'inventory_request', ?, ?, ?)
-        `,
-        [
-          request.from_warehouse_id,
-          dbItem.product_id,
-          issueQty,
-          id,
-          fromBalanceAfter,
-          userId,
-        ]
+        `INSERT INTO stock_movements (warehouse_id, product_id, batch_id, movement_type, quantity, reference_type, reference_id, balance_after, created_by) VALUES (?, ?, NULL, 'out', ?, 'inventory_request', ?, ?, ?)`,
+        [request.from_warehouse_id, dbItem.product_id, issueQty, id, fromBalanceAfter, userId]
       );
 
       if (request.to_warehouse_id) {
-        const [[toInventory]] = await connection.query(
-          `
-          SELECT id, available_qty, average_cost
-          FROM inventories
-          WHERE warehouse_id = ?
-            AND product_id = ?
-            AND variant_id IS NULL
-          LIMIT 1
-          FOR UPDATE
-          `,
+        const [[toStock]] = await connection.query(
+          `SELECT id, available_qty FROM outlet_stock WHERE outlet_id = ? AND product_id = ? LIMIT 1 FOR UPDATE`,
           [request.to_warehouse_id, dbItem.product_id]
         );
 
-        let toBalanceAfter = issueQty;
+        let toBalanceAfter;
 
-        if (toInventory) {
-          const destinationQty = toNumber(toInventory.available_qty);
-          const destinationAvgCost = toNumber(toInventory.average_cost);
-          const totalQty = destinationQty + issueQty;
-
-          let newAverageCost = averageCost;
-
-          if (totalQty > 0) {
-            newAverageCost =
-              (destinationQty * destinationAvgCost + issueQty * averageCost) /
-              totalQty;
-          }
-
-          toBalanceAfter = totalQty;
-
+        if (toStock) {
+          toBalanceAfter = toNumber(toStock.available_qty) + issueQty;
           await connection.query(
-            `
-            UPDATE inventories
-            SET
-              available_qty = ?,
-              average_cost = ?
-            WHERE id = ?
-            `,
-            [toBalanceAfter, newAverageCost, toInventory.id]
+            `UPDATE outlet_stock SET available_qty = ?, updated_at = NOW() WHERE id = ?`,
+            [toBalanceAfter, toStock.id]
           );
         } else {
+          toBalanceAfter = issueQty;
           await connection.query(
-            `
-            INSERT INTO inventories
-              (
-                warehouse_id,
-                product_id,
-                variant_id,
-                available_qty,
-                reserved_qty,
-                damaged_qty,
-                average_cost
-              )
-            VALUES (?, ?, NULL, ?, 0, 0, ?)
-            `,
-            [request.to_warehouse_id, dbItem.product_id, issueQty, averageCost]
+            `INSERT INTO outlet_stock (outlet_id, product_id, available_qty) VALUES (?, ?, ?)`,
+            [request.to_warehouse_id, dbItem.product_id, issueQty]
           );
         }
 
         await connection.query(
-          `
-          INSERT INTO stock_movements
-            (
-              warehouse_id,
-              product_id,
-              batch_id,
-              movement_type,
-              quantity,
-              reference_type,
-              reference_id,
-              balance_after,
-              created_by
-            )
-          VALUES (?, ?, NULL, 'in', ?, 'inventory_request', ?, ?, ?)
-          `,
-          [
-            request.to_warehouse_id,
-            dbItem.product_id,
-            issueQty,
-            id,
-            toBalanceAfter,
-            userId,
-          ]
+          `INSERT INTO stock_movements (warehouse_id, product_id, batch_id, movement_type, quantity, reference_type, reference_id, balance_after, created_by) VALUES (?, ?, NULL, 'in', ?, 'inventory_request', ?, ?, ?)`,
+          [request.to_warehouse_id, dbItem.product_id, issueQty, id, toBalanceAfter, userId]
         );
       }
 
@@ -948,6 +852,8 @@ exports.fulfillInventoryRequest = async (req, res) => {
     connection.release();
   }
 };
+
+exports.issueInventoryRequest = exports.fulfillInventoryRequest;
 
 exports.rejectInventoryRequest = async (req, res) => {
   try {

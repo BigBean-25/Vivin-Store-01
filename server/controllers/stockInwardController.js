@@ -18,16 +18,6 @@ const getUserId = (req) => {
   return req.user?.id || req.user?.user_id || null;
 };
 
-const getExpiryAlertDate = (expiryDate) => {
-  if (!expiryDate) return null;
-
-  const date = new Date(expiryDate);
-  if (Number.isNaN(date.getTime())) return null;
-
-  date.setDate(date.getDate() - 7);
-  return date.toISOString().slice(0, 10);
-};
-
 const updateInventoryStock = async (
   connection,
   item,
@@ -39,80 +29,35 @@ const updateInventoryStock = async (
   const qty = toNumber(item.quantity);
   const unitCost = toNumber(item.unit_cost);
 
-  const [[existingInventory]] = await connection.query(
-    `
-    SELECT id, available_qty, average_cost
-    FROM inventories
-    WHERE warehouse_id = ?
-      AND product_id = ?
-      AND variant_id IS NULL
-    LIMIT 1
-    `,
+  // 1. Insert/update outlet_stock using warehouse_id as outlet_id
+  const [[existingOutletStock]] = await connection.query(
+    `SELECT id, available_qty FROM outlet_stock WHERE outlet_id = ? AND product_id = ? LIMIT 1`,
     [warehouseId, productId]
   );
 
   let balanceAfter = qty;
-  let newAverageCost = unitCost;
 
-  if (existingInventory) {
-    const currentQty = toNumber(existingInventory.available_qty);
-    const currentAvgCost = toNumber(existingInventory.average_cost);
-    const totalQty = currentQty + qty;
-
-    if (totalQty > 0) {
-      newAverageCost =
-        (currentQty * currentAvgCost + qty * unitCost) / totalQty;
-    }
-
-    balanceAfter = totalQty;
-
+  if (existingOutletStock) {
+    balanceAfter = toNumber(existingOutletStock.available_qty) + qty;
     await connection.query(
-      `
-      UPDATE inventories
-      SET
-        available_qty = ?,
-        average_cost = ?
-      WHERE id = ?
-      `,
-      [balanceAfter, newAverageCost, existingInventory.id]
+      `UPDATE outlet_stock SET available_qty = ?, updated_at = NOW() WHERE id = ?`,
+      [balanceAfter, existingOutletStock.id]
     );
   } else {
     await connection.query(
-      `
-      INSERT INTO inventories
-        (
-          warehouse_id,
-          product_id,
-          variant_id,
-          available_qty,
-          reserved_qty,
-          damaged_qty,
-          average_cost
-        )
-      VALUES (?, ?, NULL, ?, 0, 0, ?)
-      `,
-      [warehouseId, productId, qty, unitCost]
+      `INSERT INTO outlet_stock (outlet_id, product_id, available_qty, updated_at) VALUES (?, ?, ?, NOW())`,
+      [warehouseId, productId, qty]
     );
   }
 
+  // 2. Insert inventory_batch record if batch_no or expiry_date provided
   let batchId = null;
 
   if (item.batch_no || item.expiry_date) {
     const [batchResult] = await connection.query(
-      `
-      INSERT INTO inventory_batches
-        (
-          warehouse_id,
-          product_id,
-          batch_no,
-          manufacture_date,
-          expiry_date,
-          quantity,
-          cost_price,
-          status
-        )
-      VALUES (?, ?, ?, NULL, ?, ?, ?, 'active')
-      `,
+      `INSERT INTO inventory_batches
+        (warehouse_id, product_id, batch_no, manufacture_date, expiry_date, quantity, cost_price, status)
+       VALUES (?, ?, ?, NULL, ?, ?, ?, 'active')`,
       [
         warehouseId,
         productId,
@@ -122,52 +67,34 @@ const updateInventoryStock = async (
         unitCost,
       ]
     );
-
     batchId = batchResult.insertId;
-
-    if (item.expiry_date) {
-      await connection.query(
-        `
-        INSERT INTO inventory_expiry
-          (
-            batch_id,
-            product_id,
-            warehouse_id,
-            expiry_date,
-            alert_date,
-            status
-          )
-        VALUES (?, ?, ?, ?, ?, 'normal')
-        `,
-        [
-          batchId,
-          productId,
-          warehouseId,
-          item.expiry_date,
-          getExpiryAlertDate(item.expiry_date),
-        ]
-      );
-    }
   }
 
+  // 3. Insert stock_movement with movement_type = 'in'
   await connection.query(
-    `
-    INSERT INTO stock_movements
-      (
-        warehouse_id,
-        product_id,
-        batch_id,
-        movement_type,
-        quantity,
-        reference_type,
-        reference_id,
-        balance_after,
-        created_by
-      )
-    VALUES (?, ?, ?, 'in', ?, 'stock_inward', ?, ?, ?)
-    `,
+    `INSERT INTO stock_movements
+      (warehouse_id, product_id, batch_id, movement_type, quantity, reference_type, reference_id, balance_after, created_by)
+     VALUES (?, ?, ?, 'in', ?, 'stock_inward', ?, ?, ?)`,
     [warehouseId, productId, batchId, qty, stockInwardId, balanceAfter, userId]
   );
+};
+
+exports.getStockInwardSummary = async (req, res) => {
+  try {
+    const [[summary]] = await db.query(`
+      SELECT
+        COUNT(*) AS total,
+        SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) AS draft,
+        SUM(CASE WHEN status = 'posted' THEN 1 ELSE 0 END) AS posted,
+        SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled
+      FROM stock_inward
+    `);
+
+    res.json({ success: true, summary });
+  } catch (error) {
+    console.error("Get stock inward summary error:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch summary", error: error.message });
+  }
 };
 
 exports.getStockInwards = async (req, res) => {

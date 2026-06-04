@@ -14,10 +14,7 @@ const toNumber = (value, fallback = 0) => {
 };
 
 const normalizeStatus = (value) => {
-  if (value === "inactive" || value === "draft" || value === "out_of_stock") {
-    return value;
-  }
-
+  if (value === "inactive") return "inactive";
   return "active";
 };
 
@@ -190,6 +187,22 @@ const buildUpdate = (meta, payload) => {
   });
 
   return { sets, values };
+};
+
+exports.getProductVariantSummary = async (req, res) => {
+  try {
+    const [[summary]] = await db.query(`
+      SELECT
+        COUNT(id) AS total_variants,
+        SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active_variants,
+        SUM(CASE WHEN status = 'inactive' THEN 1 ELSE 0 END) AS inactive_variants,
+        COUNT(DISTINCT product_id) AS products_with_variants
+      FROM product_variants
+    `);
+    res.json({ success: true, summary });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to fetch variant summary", error: error.message });
+  }
 };
 
 exports.getProductVariants = async (req, res) => {
@@ -592,6 +605,27 @@ exports.updateProductVariant = async (req, res) => {
   }
 };
 
+exports.updateProductVariantStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!['active', 'inactive'].includes(status)) {
+      return res.status(400).json({ success: false, message: "Status must be active or inactive" });
+    }
+
+    const [result] = await db.query(`UPDATE product_variants SET status = ? WHERE id = ?`, [status, id]);
+
+    if (!result.affectedRows) {
+      return res.status(404).json({ success: false, message: "Product variant not found" });
+    }
+
+    res.json({ success: true, message: `Product variant ${status} successfully` });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to update variant status", error: error.message });
+  }
+};
+
 exports.deleteProductVariant = async (req, res) => {
   try {
     const { id } = req.params;
@@ -599,32 +633,38 @@ exports.deleteProductVariant = async (req, res) => {
     const meta = await getMeta();
     if (!validateMeta(meta, res)) return;
 
+    const [[inInventory]] = await db.query(
+      `SELECT COUNT(id) AS cnt FROM inventories WHERE variant_id = ? LIMIT 1`, [id]
+    );
+    if (inInventory.cnt > 0) {
+      return res.status(409).json({
+        success: false,
+        message: `Cannot delete — variant is used in inventory (${inInventory.cnt} record(s)). Deactivate it instead.`,
+      });
+    }
+
+    const [[inOrders]] = await db.query(
+      `SELECT COUNT(id) AS cnt FROM order_items WHERE variant_id = ? LIMIT 1`, [id]
+    );
+    if (inOrders.cnt > 0) {
+      return res.status(409).json({
+        success: false,
+        message: `Cannot delete — variant is used in orders (${inOrders.cnt} record(s)). Deactivate it instead.`,
+      });
+    }
+
     const [result] = await db.query(
-      `
-      DELETE FROM ${TABLE}
-      WHERE \`${meta.id}\` = ?
-      `,
+      `DELETE FROM ${TABLE} WHERE \`${meta.id}\` = ?`,
       [id]
     );
 
     if (!result.affectedRows) {
-      return res.status(404).json({
-        success: false,
-        message: "Product variant not found",
-      });
+      return res.status(404).json({ success: false, message: "Product variant not found" });
     }
 
-    res.json({
-      success: true,
-      message: "Product variant deleted successfully",
-    });
+    res.json({ success: true, message: "Product variant deleted successfully" });
   } catch (error) {
     console.error("Delete product variant error:", error);
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to delete product variant",
-      error: error.message,
-    });
+    res.status(500).json({ success: false, message: "Failed to delete product variant", error: error.message });
   }
 };

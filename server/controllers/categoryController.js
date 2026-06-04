@@ -26,6 +26,21 @@ const deleteImageFile = (imagePath) => {
   }
 };
 
+exports.getCategorySummary = async (req, res) => {
+  try {
+    const [[summary]] = await db.query(`
+      SELECT
+        COUNT(id) AS total_categories,
+        SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active_categories,
+        SUM(CASE WHEN status = 'inactive' THEN 1 ELSE 0 END) AS inactive_categories
+      FROM categories
+    `);
+    res.json({ success: true, summary });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to fetch category summary", error: error.message });
+  }
+};
+
 exports.getCategories = async (req, res) => {
   try {
     const [categories] = await db.query(`
@@ -271,37 +286,62 @@ exports.updateCategory = async (req, res) => {
   }
 };
 
+exports.updateCategoryStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!['active', 'inactive'].includes(status)) {
+      return res.status(400).json({ success: false, message: "Status must be active or inactive" });
+    }
+
+    const [result] = await db.query(`UPDATE categories SET status = ? WHERE id = ?`, [status, id]);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: "Category not found" });
+    }
+
+    res.json({ success: true, message: `Category ${status} successfully` });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to update category status", error: error.message });
+  }
+};
+
 exports.deleteCategory = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const [result] = await db.query(
-      `
-      UPDATE categories
-      SET status = 'inactive'
-      WHERE id = ?
-      `,
-      [id]
+    const [[productUsage]] = await db.query(
+      `SELECT COUNT(id) AS cnt FROM products WHERE category_id = ? LIMIT 1`, [id]
     );
-
-    if (result.affectedRows === 0) {
-      return res.status(404).json({
+    if (productUsage.cnt > 0) {
+      return res.status(409).json({
         success: false,
-        message: "Category not found",
+        message: `Cannot delete — category is used by ${productUsage.cnt} product(s). Deactivate it instead.`,
       });
     }
 
-    res.json({
-      success: true,
-      message: "Category deactivated successfully",
-    });
+    const [[subUsage]] = await db.query(
+      `SELECT COUNT(id) AS cnt FROM sub_categories WHERE category_id = ? LIMIT 1`, [id]
+    );
+    if (subUsage.cnt > 0) {
+      return res.status(409).json({
+        success: false,
+        message: `Cannot delete — category has ${subUsage.cnt} sub-category(ies). Remove them first.`,
+      });
+    }
+
+    const [[cat]] = await db.query(`SELECT image FROM categories WHERE id = ? LIMIT 1`, [id]);
+    if (!cat) {
+      return res.status(404).json({ success: false, message: "Category not found" });
+    }
+
+    await db.query(`DELETE FROM categories WHERE id = ?`, [id]);
+    if (cat.image) deleteImageFile(cat.image);
+
+    res.json({ success: true, message: "Category deleted successfully" });
   } catch (error) {
     console.error("Delete category error:", error);
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to deactivate category",
-      error: error.message,
-    });
+    res.status(500).json({ success: false, message: "Failed to delete category", error: error.message });
   }
 };

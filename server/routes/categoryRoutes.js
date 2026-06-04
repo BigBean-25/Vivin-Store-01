@@ -4,11 +4,13 @@ const path = require("path");
 const fs = require("fs");
 
 const {
+  getCategorySummary,
   getCategories,
   getActiveCategories,
   createCategory,
   getCategoryById,
   updateCategory,
+  updateCategoryStatus,
   deleteCategory,
 } = require("../controllers/categoryController");
 
@@ -57,11 +59,13 @@ const upload = multer({
   },
 });
 
-router.get("/", protect, getCategories);
+router.get("/summary", protect, getCategorySummary);
 router.get("/active/list", protect, getActiveCategories);
+router.get("/", protect, getCategories);
 router.post("/", protect, upload.single("image"), createCategory);
 router.get("/:id", protect, getCategoryById);
 router.put("/:id", protect, upload.single("image"), updateCategory);
+router.patch("/:id/status", protect, updateCategoryStatus);
 router.delete("/:id", protect, deleteCategory);
 
 module.exports = router;

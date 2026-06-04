@@ -10,6 +10,7 @@ const {
   submitInventoryRequest,
   approveInventoryRequest,
   fulfillInventoryRequest,
+  issueInventoryRequest,
   rejectInventoryRequest,
   cancelInventoryRequest,
   deleteInventoryRequest,
@@ -17,14 +18,15 @@ const {
 
 const { protect } = require("../middleware/authMiddleware");
 
-router.get("/", protect, getInventoryRequests);
 router.get("/summary", protect, getInventoryRequestSummary);
+router.get("/", protect, getInventoryRequests);
 router.post("/", protect, createInventoryRequest);
 router.get("/:id", protect, getInventoryRequestById);
 router.put("/:id", protect, updateInventoryRequest);
 router.patch("/:id/submit", protect, submitInventoryRequest);
 router.patch("/:id/approve", protect, approveInventoryRequest);
 router.patch("/:id/fulfill", protect, fulfillInventoryRequest);
+router.patch("/:id/issue", protect, issueInventoryRequest);
 router.patch("/:id/reject", protect, rejectInventoryRequest);
 router.patch("/:id/cancel", protect, cancelInventoryRequest);
 router.delete("/:id", protect, deleteInventoryRequest);

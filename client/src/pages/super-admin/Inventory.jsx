@@ -66,10 +66,10 @@ export default function Inventory() {
       if (search.trim()) params.append("search", search.trim());
       if (warehouseFilter) params.append("warehouse_id", warehouseFilter);
 
-      const res = await API.get(`/api/inventory?${params.toString()}`);
+      const res = await API.get(`/api/inventory/outlet-stock?${params.toString()}`);
 
       if (res.data.success) {
-        setInventory(res.data.inventory || res.data.data || []);
+        setInventory(res.data.inventory || []);
       }
     } catch (err) {
       setError(err.response?.data?.message || "Failed to fetch inventory");
@@ -82,7 +82,7 @@ export default function Inventory() {
     try {
       const res = await API.get("/api/inventory/summary");
       if (res.data.success) {
-        setSummary(res.data.data);
+        setSummary(res.data.summary);
       }
     } catch {
       setSummary(null);
@@ -206,9 +206,9 @@ export default function Inventory() {
       setError("");
 
       if (editingInventoryId) {
-        await API.put(`/api/inventory/${editingInventoryId}`, formData);
+        await API.put(`/api/inventory/outlet-stock/${editingInventoryId}`, formData);
       } else {
-        await API.post("/api/inventory", formData);
+        await API.post("/api/inventory/outlet-stock", formData);
       }
 
       showSuccess(
@@ -240,7 +240,7 @@ export default function Inventory() {
 
     try {
       setError("");
-      await API.delete(`/api/inventory/${item.id}`);
+      await API.delete(`/api/inventory/outlet-stock/${item.id}`);
 
       showSuccess("Inventory stock deleted successfully");
       refreshAll();

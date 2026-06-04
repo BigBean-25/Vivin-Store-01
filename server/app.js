@@ -44,6 +44,11 @@ const productReviewRoutes = require("./routes/productReviewRoutes");
 const productReportRoutes = require("./routes/productReportRoutes");
 
 const warehouseRoutes = require("./routes/warehouseRoutes");
+const warehouseZoneRoutes = require("./routes/warehouseZoneRoutes");
+const warehouseRackRoutes = require("./routes/warehouseRackRoutes");
+const warehouseBinRoutes = require("./routes/warehouseBinRoutes");
+const warehouseStaffRoutes = require("./routes/warehouseStaffRoutes");
+const warehouseStockRoutes = require("./routes/warehouseStockRoutes");
 const inventoryRoutes = require("./routes/inventoryRoutes");
 const inventoryBatchRoutes = require("./routes/inventoryBatchRoutes");
 const inventoryAlertRoutes = require("./routes/inventoryAlertRoutes");
@@ -194,8 +199,33 @@ app.use("/api/goods-receipts", goodsReceiptRoutes);
 app.use("/api/procurement-payments", procurementPaymentRoutes);
 app.use("/api/procurement-returns", procurementReturnRoutes);
 
+app.get("/api/warehouse-zones-test", (req, res) => {
+  res.json({ success: true, message: "Warehouse zones test route working" });
+});
+
+app.get("/api/warehouse-racks-test", (req, res) => {
+  res.json({ success: true, message: "Warehouse racks test route working" });
+});
+
+app.get("/api/warehouse-bins-test", (req, res) => {
+  res.json({ success: true, message: "Warehouse bins test route working" });
+});
+
+app.get("/api/warehouse-staff-test", (req, res) => {
+  res.json({ success: true, message: "Warehouse staff test route working" });
+});
+
+app.get("/api/warehouse-stock-test", (req, res) => {
+  res.json({ success: true, message: "Warehouse stock test route working" });
+});
+
 /* Warehouse & Inventory */
 app.use("/api/warehouses", warehouseRoutes);
+app.use("/api/warehouse-zones", warehouseZoneRoutes);
+app.use("/api/warehouse-racks", warehouseRackRoutes);
+app.use("/api/warehouse-bins", warehouseBinRoutes);
+app.use("/api/warehouse-staff", warehouseStaffRoutes);
+app.use("/api/warehouse-stock", warehouseStockRoutes);
 app.use("/api/inventory", inventoryRoutes);
 app.use("/api/inventory-batches", inventoryBatchRoutes);
 app.use("/api/inventory-alerts", inventoryAlertRoutes);

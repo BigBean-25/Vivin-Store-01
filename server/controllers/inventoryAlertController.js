@@ -136,24 +136,19 @@ exports.getInventoryAlerts = async (req, res) => {
         p.name AS product_name,
         p.product_code,
         p.sku,
-        u.short_name AS unit_name,
         ia.alert_type,
         ia.message,
         ia.status,
         ia.created_at,
-        i.available_qty,
-        i.reserved_qty,
-        i.damaged_qty,
+        os.available_qty,
         p.min_stock_level,
         p.reorder_level
       FROM inventory_alerts ia
       LEFT JOIN warehouses w ON w.id = ia.warehouse_id
       LEFT JOIN products p ON p.id = ia.product_id
-      LEFT JOIN units u ON u.id = p.unit_id
-      LEFT JOIN inventories i
-        ON i.product_id = ia.product_id
-        AND i.warehouse_id <=> ia.warehouse_id
-        AND i.variant_id IS NULL
+      LEFT JOIN outlet_stock os
+        ON os.product_id = ia.product_id
+        AND os.outlet_id = ia.warehouse_id
       ${whereSql}
       ORDER BY
         CASE WHEN ia.status = 'open' THEN 0 ELSE 1 END,
@@ -224,24 +219,19 @@ exports.getInventoryAlertById = async (req, res) => {
         p.name AS product_name,
         p.product_code,
         p.sku,
-        u.short_name AS unit_name,
         ia.alert_type,
         ia.message,
         ia.status,
         ia.created_at,
-        i.available_qty,
-        i.reserved_qty,
-        i.damaged_qty,
+        os.available_qty,
         p.min_stock_level,
         p.reorder_level
       FROM inventory_alerts ia
       LEFT JOIN warehouses w ON w.id = ia.warehouse_id
       LEFT JOIN products p ON p.id = ia.product_id
-      LEFT JOIN units u ON u.id = p.unit_id
-      LEFT JOIN inventories i
-        ON i.product_id = ia.product_id
-        AND i.warehouse_id <=> ia.warehouse_id
-        AND i.variant_id IS NULL
+      LEFT JOIN outlet_stock os
+        ON os.product_id = ia.product_id
+        AND os.outlet_id = ia.warehouse_id
       WHERE ia.id = ?
       LIMIT 1
       `,
@@ -548,23 +538,22 @@ exports.generateInventoryAlerts = async (req, res) => {
     const [lowStockRows] = await connection.query(
       `
       SELECT
-        i.warehouse_id,
+        os.outlet_id AS warehouse_id,
         w.name AS warehouse_name,
-        i.product_id,
+        os.product_id,
         p.name AS product_name,
         p.product_code,
         p.sku,
-        i.available_qty,
+        os.available_qty,
         p.min_stock_level,
         p.reorder_level,
         COALESCE(NULLIF(p.reorder_level, 0), NULLIF(p.min_stock_level, 0), 0) AS alert_level
-      FROM inventories i
-      INNER JOIN products p ON p.id = i.product_id
-      LEFT JOIN warehouses w ON w.id = i.warehouse_id
-      WHERE i.variant_id IS NULL
-        AND p.status = 'active'
+      FROM outlet_stock os
+      INNER JOIN products p ON p.id = os.product_id
+      LEFT JOIN warehouses w ON w.id = os.outlet_id
+      WHERE p.status = 'active'
         AND COALESCE(NULLIF(p.reorder_level, 0), NULLIF(p.min_stock_level, 0), 0) > 0
-        AND i.available_qty <= COALESCE(NULLIF(p.reorder_level, 0), NULLIF(p.min_stock_level, 0), 0)
+        AND os.available_qty <= COALESCE(NULLIF(p.reorder_level, 0), NULLIF(p.min_stock_level, 0), 0)
       `
     );
 

@@ -8,6 +8,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000
 
 export default function SubCategories() {
   const [subCategories, setSubCategories] = useState([]);
+  const [summary, setSummary] = useState({});
   const [categories, setCategories] = useState([]);
   const [formData, setFormData] = useState(initialForm);
   const [editingId, setEditingId] = useState(null);
@@ -20,8 +21,16 @@ export default function SubCategories() {
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState("");
 
+  const fetchSummary = async () => {
+    try { const res = await API.get("/api/sub-categories/summary"); if (res.data.success) setSummary(res.data.summary || {}); } catch { setSummary({}); }
+  };
+
   const fetchSubCategories = async () => {
-    try { setLoading(true); setError(""); const res = await API.get("/api/sub-categories"); if (res.data.success) setSubCategories(res.data.subCategories || []); }
+    try {
+      setLoading(true); setError("");
+      const [scRes] = await Promise.all([API.get("/api/sub-categories"), fetchSummary()]);
+      if (scRes.data.success) setSubCategories(scRes.data.subCategories || []);
+    }
     catch (err) { setError(err.response?.data?.message || "Failed to fetch sub categories"); }
     finally { setLoading(false); }
   };
@@ -119,10 +128,17 @@ export default function SubCategories() {
     finally { setSaving(false); }
   };
 
-  const handleDeactivate = async (id) => {
-    if (!window.confirm("Are you sure you want to deactivate this sub category?")) return;
-    try { await API.delete(`/api/sub-categories/${id}`); fetchSubCategories(); }
-    catch (err) { setError(err.response?.data?.message || "Failed to deactivate sub category"); }
+  const handleToggleStatus = async (item) => {
+    const newStatus = item.status === "active" ? "inactive" : "active";
+    if (!window.confirm(`${newStatus === "inactive" ? "Deactivate" : "Activate"} sub category "${item.name}"?`)) return;
+    try { setError(""); await API.patch(`/api/sub-categories/${item.id}/status`, { status: newStatus }); fetchSubCategories(); }
+    catch (err) { setError(err.response?.data?.message || "Failed to update sub category status"); }
+  };
+
+  const handleDelete = async (item) => {
+    if (!window.confirm(`Permanently delete sub category "${item.name}"? This cannot be undone.`)) return;
+    try { setError(""); await API.delete(`/api/sub-categories/${item.id}`); fetchSubCategories(); }
+    catch (err) { setError(err.response?.data?.message || "Failed to delete sub category"); }
   };
 
   return (
@@ -130,11 +146,11 @@ export default function SubCategories() {
       <div className="sub-category-page">
         <style>{css}</style>
         <div className="sub-category-hero"><div className="hero-left"><div className="hero-icon"><Layers3 size={28} /></div><div><h1>Sub Categories</h1><p>Create sub categories under main product categories. Example: Vegetables → Fresh Vegetables, Leafy Vegetables, Root Vegetables.</p></div></div><div className="hero-actions"><button className="secondary-btn" onClick={fetchSubCategories}><RefreshCw size={17} />Refresh</button><button className="primary-btn" onClick={() => setShowForm(true)}><Plus size={18} />Add Sub Category</button></div></div>
-        <div className="stats-grid"><div className="stat-card"><h3>{subCategories.length}</h3><p>Total Sub Categories</p></div><div className="stat-card"><h3>{subCategories.filter((s) => s.status === "active").length}</h3><p>Active Sub Categories</p></div><div className="stat-card"><h3>{subCategories.filter((s) => s.status === "inactive").length}</h3><p>Inactive Sub Categories</p></div><div className="stat-card"><h3>{categories.length}</h3><p>Main Categories</p></div></div>
+        <div className="stats-grid"><div className="stat-card"><h3>{Number(summary.total_sub_categories) || subCategories.length}</h3><p>Total Sub Categories</p></div><div className="stat-card"><h3>{Number(summary.active_sub_categories) || subCategories.filter((s) => s.status === "active").length}</h3><p>Active</p></div><div className="stat-card"><h3>{Number(summary.inactive_sub_categories) || subCategories.filter((s) => s.status === "inactive").length}</h3><p>Inactive</p></div><div className="stat-card"><h3>{Number(summary.categories_used) || categories.length}</h3><p>Categories Used</p></div></div>
         {error && <div className="error-box">{error}</div>}
         {showForm && <div className="form-card"><div className="form-header"><h2>{editingId ? "Edit Sub Category" : "Add New Sub Category"}</h2><button className="close-btn" onClick={handleCancelForm}><X size={18} /></button></div><form onSubmit={handleSubmit}><div className="form-grid"><div className="form-group"><label>Main Category *</label><select name="category_id" value={formData.category_id} onChange={handleChange} required><option value="">Select Category</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></div><div className="form-group"><label>Sub Category Name *</label><input name="name" value={formData.name} onChange={handleChange} placeholder="Fresh Vegetables" required /></div><div className="form-group"><label>Slug</label><input name="slug" value={formData.slug} onChange={handleChange} placeholder="fresh-vegetables" /></div><div className="form-group"><label>Sub Category Image</label><input type="file" accept="image/jpeg,image/jpg,image/png,image/webp" onChange={handleImageChange} />{imagePreview && <img src={imagePreview} alt="Sub Category Preview" className="sub-image" style={{ marginTop: "10px" }} />}</div><div className="form-group"><label>Sort Order</label><input type="number" name="sort_order" value={formData.sort_order} onChange={handleChange} placeholder="1" /></div><div className="form-group"><label>Status</label><select name="status" value={formData.status} onChange={handleChange}><option value="active">Active</option><option value="inactive">Inactive</option></select></div><div className="form-group full"><label>Description</label><textarea name="description" value={formData.description} onChange={handleChange} placeholder="Daily fresh vegetables" /></div></div><div className="form-actions"><button type="button" className="secondary-btn" onClick={handleCancelForm}>Cancel</button><button type="submit" className="primary-btn" disabled={saving}>{saving ? "Saving..." : editingId ? "Update Sub Category" : "Save Sub Category"}</button></div></form></div>}
         <div className="toolbar"><div className="search-wrap"><Search size={17} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search sub category, category or status..." /></div><select className="filter-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}><option value="active">Active Sub Categories</option><option value="inactive">Inactive Sub Categories</option><option value="all">All Sub Categories</option></select><div>Showing <strong>{filteredSubCategories.length}</strong> sub categories</div></div>
-        <div className="table-card"><div className="table-header"><h2>Sub Category List</h2><p>Sub category records from MySQL database</p></div>{loading ? <div className="empty-box"><div><h3>Loading sub categories...</h3><p>Please wait while records are loading.</p></div></div> : filteredSubCategories.length === 0 ? <div className="empty-box"><div><h3>No sub categories found</h3><p>Click Add Sub Category to create your first sub category.</p></div></div> : <div className="table-wrap"><table><thead><tr><th>Image</th><th>Sub Category</th><th>Main Category</th><th>Description</th><th>Sort</th><th>Status</th><th>Action</th></tr></thead><tbody>{filteredSubCategories.map((item) => <tr key={item.id}><td>{item.image ? <img src={getImageUrl(item.image)} alt={item.name} className="sub-image" /> : <div className="image-placeholder"><Layers3 size={20} /></div>}</td><td><div className="sub-name">{item.name}</div><div className="small-text">/{item.slug}</div></td><td><span className="category-badge"><FolderTree size={13} />{item.category_name || "-"}</span></td><td>{item.description || "-"}</td><td>{item.sort_order || 0}</td><td><span className={`status-badge ${item.status}`}>{item.status}</span></td><td><div className="action-buttons"><button className="edit-btn" onClick={() => handleEdit(item)}><Edit3 size={16} /></button>{item.status === "active" ? <button className="delete-btn" onClick={() => handleDeactivate(item.id)}><Trash2 size={16} /></button> : <span>Deactivated</span>}</div></td></tr>)}</tbody></table></div>}</div>
+        <div className="table-card"><div className="table-header"><h2>Sub Category List</h2><p>Sub category records from MySQL database</p></div>{loading ? <div className="empty-box"><div><h3>Loading sub categories...</h3><p>Please wait while records are loading.</p></div></div> : filteredSubCategories.length === 0 ? <div className="empty-box"><div><h3>No sub categories found</h3><p>Click Add Sub Category to create your first sub category.</p></div></div> : <div className="table-wrap"><table><thead><tr><th>Image</th><th>Sub Category</th><th>Main Category</th><th>Description</th><th>Sort</th><th>Status</th><th>Action</th></tr></thead><tbody>{filteredSubCategories.map((item) => <tr key={item.id}><td>{item.image ? <img src={getImageUrl(item.image)} alt={item.name} className="sub-image" /> : <div className="image-placeholder"><Layers3 size={20} /></div>}</td><td><div className="sub-name">{item.name}</div><div className="small-text">/{item.slug}</div></td><td><span className="category-badge"><FolderTree size={13} />{item.category_name || "-"}</span></td><td>{item.description || "-"}</td><td>{item.sort_order || 0}</td><td><span className={`status-badge ${item.status}`}>{item.status}</span></td><td><div className="action-buttons"><button className="edit-btn" onClick={() => handleEdit(item)} title="Edit"><Edit3 size={16} /></button><button type="button" onClick={() => handleToggleStatus(item)} title={item.status === "active" ? "Deactivate" : "Activate"} style={{height:'32px',padding:'0 10px',borderRadius:'10px',border:'none',cursor:'pointer',fontWeight:700,fontSize:'11px',background:item.status==="active"?'#fff1f1':'#effbf4',color:item.status==="active"?'#d63636':'#1c9b58'}}>{item.status === "active" ? "Deactivate" : "Activate"}</button><button className="delete-btn" onClick={() => handleDelete(item)} title="Delete permanently"><Trash2 size={16} /></button></div></td></tr>)}</tbody></table></div>}</div>
       </div>
     </AdminLayout>
   );

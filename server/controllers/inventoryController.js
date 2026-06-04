@@ -19,6 +19,145 @@ const getInventoryCondition = (variantId) => {
   };
 };
 
+exports.getOutletStock = async (req, res) => {
+  try {
+    const { warehouse_id = "", search = "" } = req.query;
+
+    const where = [];
+    const params = [];
+
+    if (warehouse_id) {
+      where.push("os.outlet_id = ?");
+      params.push(warehouse_id);
+    }
+
+    if (search) {
+      where.push("(p.name LIKE ? OR p.product_code LIKE ? OR p.sku LIKE ? OR w.name LIKE ?)");
+      const kw = `%${search}%`;
+      params.push(kw, kw, kw, kw);
+    }
+
+    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+    const [rows] = await db.query(
+      `SELECT
+        os.id,
+        os.outlet_id AS warehouse_id,
+        w.name AS warehouse_name,
+        w.warehouse_code,
+        os.product_id,
+        p.name AS product_name,
+        p.product_code,
+        p.sku,
+        p.purchase_price AS average_cost,
+        p.min_stock_level,
+        p.reorder_level,
+        os.available_qty,
+        0 AS reserved_qty,
+        0 AS damaged_qty,
+        (os.available_qty * COALESCE(p.purchase_price, 0)) AS stock_value,
+        CASE
+          WHEN os.available_qty <= COALESCE(p.min_stock_level, 0) THEN 'critical'
+          WHEN os.available_qty <= COALESCE(p.reorder_level, 0) THEN 'low_stock'
+          ELSE 'normal'
+        END AS stock_status,
+        os.updated_at
+       FROM outlet_stock os
+       LEFT JOIN warehouses w ON w.id = os.outlet_id
+       LEFT JOIN products p ON p.id = os.product_id
+       ${whereSql}
+       ORDER BY p.name ASC`,
+      params
+    );
+
+    res.json({ success: true, count: rows.length, inventory: rows });
+  } catch (error) {
+    console.error("Get outlet stock error:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch outlet stock", error: error.message });
+  }
+};
+
+exports.createOrUpdateOutletStock = async (req, res) => {
+  try {
+    const { warehouse_id, product_id, available_qty } = req.body;
+
+    if (!warehouse_id || !product_id) {
+      return res.status(400).json({ success: false, message: "Warehouse and product are required" });
+    }
+
+    const [[existing]] = await db.query(
+      `SELECT id FROM outlet_stock WHERE outlet_id = ? AND product_id = ? LIMIT 1`,
+      [warehouse_id, product_id]
+    );
+
+    if (existing) {
+      await db.query(
+        `UPDATE outlet_stock SET available_qty = ?, updated_at = NOW() WHERE id = ?`,
+        [toNumber(available_qty), existing.id]
+      );
+      return res.json({ success: true, message: "Outlet stock updated successfully", id: existing.id });
+    }
+
+    const [result] = await db.query(
+      `INSERT INTO outlet_stock (outlet_id, product_id, available_qty, updated_at) VALUES (?, ?, ?, NOW())`,
+      [warehouse_id, product_id, toNumber(available_qty)]
+    );
+
+    res.status(201).json({ success: true, message: "Outlet stock created successfully", id: result.insertId });
+  } catch (error) {
+    console.error("Create/update outlet stock error:", error);
+    res.status(500).json({ success: false, message: "Failed to save outlet stock", error: error.message });
+  }
+};
+
+exports.updateOutletStock = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { available_qty } = req.body;
+
+    const [[existing]] = await db.query(
+      `SELECT id FROM outlet_stock WHERE id = ? LIMIT 1`,
+      [id]
+    );
+
+    if (!existing) {
+      return res.status(404).json({ success: false, message: "Outlet stock record not found" });
+    }
+
+    await db.query(
+      `UPDATE outlet_stock SET available_qty = ?, updated_at = NOW() WHERE id = ?`,
+      [toNumber(available_qty), id]
+    );
+
+    res.json({ success: true, message: "Outlet stock updated successfully" });
+  } catch (error) {
+    console.error("Update outlet stock error:", error);
+    res.status(500).json({ success: false, message: "Failed to update outlet stock", error: error.message });
+  }
+};
+
+exports.deleteOutletStock = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [[existing]] = await db.query(
+      `SELECT id FROM outlet_stock WHERE id = ? LIMIT 1`,
+      [id]
+    );
+
+    if (!existing) {
+      return res.status(404).json({ success: false, message: "Outlet stock record not found" });
+    }
+
+    await db.query(`DELETE FROM outlet_stock WHERE id = ?`, [id]);
+
+    res.json({ success: true, message: "Outlet stock record deleted successfully" });
+  } catch (error) {
+    console.error("Delete outlet stock error:", error);
+    res.status(500).json({ success: false, message: "Failed to delete outlet stock", error: error.message });
+  }
+};
+
 exports.getInventories = async (req, res) => {
   try {
     const [inventories] = await db.query(`
@@ -117,33 +256,33 @@ exports.getLowStockInventories = async (req, res) => {
 
 exports.getInventorySummary = async (req, res) => {
   try {
-    const [summaryRows] = await db.query(`
-      SELECT 
+    const [[summaryRow]] = await db.query(`
+      SELECT
         COUNT(*) AS total_stock_items,
-        COALESCE(SUM(available_qty), 0) AS total_available_qty,
-        COALESCE(SUM(reserved_qty), 0) AS total_reserved_qty,
-        COALESCE(SUM(damaged_qty), 0) AS total_damaged_qty,
-        COALESCE(SUM((available_qty + reserved_qty + damaged_qty) * average_cost), 0) AS total_stock_value
-      FROM inventories
+        COALESCE(SUM(os.available_qty), 0) AS total_available_qty,
+        0 AS total_reserved_qty,
+        0 AS total_damaged_qty,
+        COALESCE(SUM(os.available_qty * COALESCE(p.purchase_price, 0)), 0) AS total_stock_value
+      FROM outlet_stock os
+      LEFT JOIN products p ON p.id = os.product_id
     `);
 
-    const [lowStockRows] = await db.query(`
+    const [[lowRow]] = await db.query(`
       SELECT COUNT(*) AS low_stock_count
-      FROM inventories i
-      LEFT JOIN products p ON i.product_id = p.id
-      WHERE i.available_qty <= p.reorder_level
+      FROM outlet_stock os
+      LEFT JOIN products p ON p.id = os.product_id
+      WHERE os.available_qty <= COALESCE(p.reorder_level, 0)
     `);
 
     res.json({
       success: true,
       summary: {
-        ...summaryRows[0],
-        low_stock_count: lowStockRows[0]?.low_stock_count || 0,
+        ...summaryRow,
+        low_stock_count: lowRow?.low_stock_count || 0,
       },
     });
   } catch (error) {
     console.error("Get inventory summary error:", error);
-
     res.status(500).json({
       success: false,
       message: "Failed to fetch inventory summary",

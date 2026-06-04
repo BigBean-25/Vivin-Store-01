@@ -25,19 +25,11 @@ const throwError = (statusCode, message) => {
 };
 
 const getSystemQty = async (connection, warehouseId, productId) => {
-  const [[inventory]] = await connection.query(
-    `
-    SELECT id, available_qty
-    FROM inventories
-    WHERE warehouse_id = ?
-      AND product_id = ?
-      AND variant_id IS NULL
-    LIMIT 1
-    `,
+  const [[row]] = await connection.query(
+    `SELECT available_qty FROM outlet_stock WHERE outlet_id = ? AND product_id = ? LIMIT 1`,
     [warehouseId, productId]
   );
-
-  return inventory ? toNumber(inventory.available_qty) : 0;
+  return row ? toNumber(row.available_qty) : 0;
 };
 
 const applyAdjustmentStock = async (
@@ -49,70 +41,31 @@ const applyAdjustmentStock = async (
 ) => {
   const productId = item.product_id;
   const batchId = cleanValue(item.batch_id);
+  const physicalQty = toNumber(item.physical_qty);
   const differenceQty = toNumber(item.difference_qty);
 
-  if (differenceQty === 0) return;
-
-  const [[inventory]] = await connection.query(
-    `
-    SELECT id, available_qty
-    FROM inventories
-    WHERE warehouse_id = ?
-      AND product_id = ?
-      AND variant_id IS NULL
-    LIMIT 1
-    `,
+  // 1. Update outlet_stock.available_qty = physical_qty (absolute set)
+  const [[existingOutletStock]] = await connection.query(
+    `SELECT id, available_qty FROM outlet_stock WHERE outlet_id = ? AND product_id = ? LIMIT 1`,
     [warehouseId, productId]
   );
 
-  let inventoryId = inventory?.id || null;
-  let currentQty = inventory ? toNumber(inventory.available_qty) : 0;
-
-  const newQty = currentQty + differenceQty;
-
-  if (newQty < 0) {
-    throwError(
-      400,
-      `Insufficient stock for product ID ${productId}. Current: ${currentQty}, Adjustment: ${differenceQty}`
-    );
-  }
-
-  if (inventoryId) {
+  if (existingOutletStock) {
     await connection.query(
-      `
-      UPDATE inventories
-      SET available_qty = ?
-      WHERE id = ?
-      `,
-      [newQty, inventoryId]
+      `UPDATE outlet_stock SET available_qty = ?, updated_at = NOW() WHERE id = ?`,
+      [physicalQty, existingOutletStock.id]
     );
   } else {
-    if (differenceQty < 0) {
-      throwError(400, `No inventory found for product ID ${productId}`);
-    }
-
-    const [inventoryResult] = await connection.query(
-      `
-      INSERT INTO inventories
-        (warehouse_id, product_id, variant_id, available_qty, reserved_qty, damaged_qty, average_cost)
-      VALUES (?, ?, NULL, ?, 0, 0, 0)
-      `,
-      [warehouseId, productId, newQty]
+    await connection.query(
+      `INSERT INTO outlet_stock (outlet_id, product_id, available_qty, updated_at) VALUES (?, ?, ?, NOW())`,
+      [warehouseId, productId, physicalQty]
     );
-
-    inventoryId = inventoryResult.insertId;
   }
 
+  // 2. If batch_id selected, adjust inventory_batches.quantity by difference_qty
   if (batchId) {
     const [[batch]] = await connection.query(
-      `
-      SELECT id, quantity
-      FROM inventory_batches
-      WHERE id = ?
-        AND warehouse_id = ?
-        AND product_id = ?
-      LIMIT 1
-      `,
+      `SELECT id, quantity FROM inventory_batches WHERE id = ? AND warehouse_id = ? AND product_id = ? LIMIT 1`,
       [batchId, warehouseId, productId]
     );
 
@@ -125,51 +78,41 @@ const applyAdjustmentStock = async (
     if (newBatchQty < 0) {
       throwError(
         400,
-        `Insufficient batch stock for product ID ${productId}. Current batch qty: ${batch.quantity}, Adjustment: ${differenceQty}`
+        `Insufficient batch stock for product ID ${productId}. Batch qty: ${batch.quantity}, Adjustment: ${differenceQty}`
       );
     }
 
     await connection.query(
-      `
-      UPDATE inventory_batches
-      SET
-        quantity = ?,
-        status = CASE
-          WHEN ? <= 0 THEN 'consumed'
-          ELSE 'active'
-        END
-      WHERE id = ?
-      `,
+      `UPDATE inventory_batches SET quantity = ?, status = CASE WHEN ? <= 0 THEN 'consumed' ELSE 'active' END WHERE id = ?`,
       [newBatchQty, newBatchQty, batchId]
     );
   }
 
+  // 3. Insert stock_movement with movement_type = 'adjustment'
   await connection.query(
-    `
-    INSERT INTO stock_movements
-      (
-        warehouse_id,
-        product_id,
-        batch_id,
-        movement_type,
-        quantity,
-        reference_type,
-        reference_id,
-        balance_after,
-        created_by
-      )
-    VALUES (?, ?, ?, 'adjustment', ?, 'stock_adjustment', ?, ?, ?)
-    `,
-    [
-      warehouseId,
-      productId,
-      batchId,
-      differenceQty,
-      stockAdjustmentId,
-      newQty,
-      userId,
-    ]
+    `INSERT INTO stock_movements
+      (warehouse_id, product_id, batch_id, movement_type, quantity, reference_type, reference_id, balance_after, created_by)
+     VALUES (?, ?, ?, 'adjustment', ?, 'stock_adjustment', ?, ?, ?)`,
+    [warehouseId, productId, batchId, differenceQty, stockAdjustmentId, physicalQty, userId]
   );
+};
+
+exports.getStockAdjustmentSummary = async (req, res) => {
+  try {
+    const [[summary]] = await db.query(`
+      SELECT
+        COUNT(*) AS total,
+        SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) AS draft,
+        SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) AS approved,
+        SUM(CASE WHEN status = 'posted' THEN 1 ELSE 0 END) AS posted,
+        SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled
+      FROM stock_adjustments
+    `);
+    res.json({ success: true, summary });
+  } catch (error) {
+    console.error("Get stock adjustment summary error:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch summary", error: error.message });
+  }
 };
 
 exports.getStockAdjustments = async (req, res) => {

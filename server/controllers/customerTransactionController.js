@@ -1,5 +1,44 @@
 const db = require("../config/db");
 
+exports.getSummary = async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT
+        COUNT(*) AS total,
+        SUM(transaction_type = 'credit') AS total_credit_count,
+        SUM(transaction_type = 'debit') AS total_debit_count,
+        COALESCE(SUM(CASE WHEN transaction_type = 'credit' THEN amount ELSE 0 END), 0) AS total_credit_amount,
+        COALESCE(SUM(CASE WHEN transaction_type = 'debit' THEN amount ELSE 0 END), 0) AS total_debit_amount,
+        COALESCE(SUM(amount), 0) AS total_amount,
+        COUNT(DISTINCT customer_id) AS customers_with_transactions
+      FROM customer_transactions
+    `);
+
+    const s = rows[0];
+
+    res.json({
+      success: true,
+      summary: {
+        total: Number(s.total),
+        total_credit_count: Number(s.total_credit_count),
+        total_debit_count: Number(s.total_debit_count),
+        total_credit_amount: Number(s.total_credit_amount),
+        total_debit_amount: Number(s.total_debit_amount),
+        total_amount: Number(s.total_amount),
+        customers_with_transactions: Number(s.customers_with_transactions),
+      },
+    });
+  } catch (error) {
+    console.error("Get customer transaction summary error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch customer transaction summary",
+      error: error.message,
+    });
+  }
+};
+
 exports.getAllCustomerTransactions = async (req, res) => {
   try {
     const [transactions] = await db.query(`

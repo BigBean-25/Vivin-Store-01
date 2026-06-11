@@ -572,3 +572,89 @@ exports.deleteVendorRating = async (req, res) => {
     });
   }
 };
+
+exports.getVendorRatingSummary = async (req, res) => {
+  try {
+    const meta = await getMeta();
+    if (!validateMeta(meta, res)) return;
+
+    const ratingExpr = meta.rating ? `vr.\`${meta.rating}\`` : "NULL";
+    const statusExpr = meta.status ? `vr.\`${meta.status}\`` : "NULL";
+
+    const [rows] = await db.query(
+      `
+      SELECT
+        COUNT(*) AS total_ratings,
+        ${ratingExpr ? `AVG(${ratingExpr})` : "NULL"} AS average_rating,
+        ${ratingExpr ? `MAX(${ratingExpr})` : "NULL"} AS highest_rating,
+        ${ratingExpr ? `MIN(${ratingExpr})` : "NULL"} AS lowest_rating,
+        SUM(CASE WHEN ${statusExpr ? `${statusExpr} = 'active'` : "1=1"} THEN 1 ELSE 0 END) AS active_count,
+        COUNT(DISTINCT vr.\`${meta.vendorId}\`) AS rated_vendors
+      FROM ${TABLE} vr
+      `
+    );
+
+    const row = rows[0] || {};
+
+    res.json({
+      success: true,
+      summary: {
+        total_ratings: Number(row.total_ratings || 0),
+        average_rating: row.average_rating !== null ? Number(Number(row.average_rating).toFixed(2)) : 0,
+        highest_rating: row.highest_rating !== null ? Number(row.highest_rating) : 0,
+        lowest_rating: row.lowest_rating !== null ? Number(row.lowest_rating) : 0,
+        active_count: Number(row.active_count || 0),
+        rated_vendors: Number(row.rated_vendors || 0),
+      },
+    });
+  } catch (error) {
+    console.error("Get vendor rating summary error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch vendor rating summary",
+      error: error.message,
+    });
+  }
+};
+
+exports.updateVendorRatingStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    const meta = await getMeta();
+    if (!validateMeta(meta, res)) return;
+
+    if (!meta.status) {
+      return res.status(400).json({
+        success: false,
+        message: "Status column does not exist in vendor_ratings. Run the provided ALTER SQL to add it.",
+      });
+    }
+
+    const [[existing]] = await db.query(
+      `SELECT \`${meta.id}\` AS id FROM ${TABLE} WHERE \`${meta.id}\` = ? LIMIT 1`,
+      [id]
+    );
+
+    if (!existing) {
+      return res.status(404).json({ success: false, message: "Vendor rating not found" });
+    }
+
+    await db.query(
+      `UPDATE ${TABLE} SET \`${meta.status}\` = ? WHERE \`${meta.id}\` = ?`,
+      [normalizeStatus(status), id]
+    );
+
+    res.json({ success: true, message: "Vendor rating status updated successfully" });
+  } catch (error) {
+    console.error("Update vendor rating status error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to update vendor rating status",
+      error: error.message,
+    });
+  }
+};

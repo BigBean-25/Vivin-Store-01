@@ -166,6 +166,28 @@ const buildUpdate = (meta, payload) => {
   };
 };
 
+exports.getVendorBankAccountSummary = async (req, res) => {
+  try {
+    const meta = await getMeta();
+
+    const countFields = [
+      `COUNT(\`${meta.id}\`)                                              AS total_accounts`,
+      meta.isDefault ? `SUM(CASE WHEN \`${meta.isDefault}\` = 1 THEN 1 ELSE 0 END) AS default_accounts` : `0 AS default_accounts`,
+      meta.status    ? `SUM(CASE WHEN \`${meta.status}\` = 'active'   THEN 1 ELSE 0 END) AS active_accounts`   : `COUNT(\`${meta.id}\`) AS active_accounts`,
+      meta.status    ? `SUM(CASE WHEN \`${meta.status}\` = 'inactive' THEN 1 ELSE 0 END) AS inactive_accounts` : `0 AS inactive_accounts`,
+      meta.accountType ? `SUM(CASE WHEN \`${meta.accountType}\` = 'current'     THEN 1 ELSE 0 END) AS current_count`     : `0 AS current_count`,
+      meta.accountType ? `SUM(CASE WHEN \`${meta.accountType}\` = 'savings'     THEN 1 ELSE 0 END) AS savings_count`     : `0 AS savings_count`,
+      meta.accountType ? `SUM(CASE WHEN \`${meta.accountType}\` = 'cash_credit' THEN 1 ELSE 0 END) AS cash_credit_count` : `0 AS cash_credit_count`,
+      meta.accountType ? `SUM(CASE WHEN \`${meta.accountType}\` = 'overdraft'   THEN 1 ELSE 0 END) AS overdraft_count`   : `0 AS overdraft_count`,
+    ].join(",\n      ");
+
+    const [[summary]] = await db.query(`SELECT ${countFields} FROM ${TABLE}`);
+    res.json({ success: true, summary });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to fetch vendor bank account summary", error: error.message });
+  }
+};
+
 exports.getVendorBankAccounts = async (req, res) => {
   try {
     const {
@@ -554,6 +576,36 @@ exports.updateVendorBankAccount = async (req, res) => {
       message: "Failed to update vendor bank account",
       error: error.message,
     });
+  }
+};
+
+exports.updateVendorBankAccountStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!["active", "inactive"].includes(status)) {
+      return res.status(400).json({ success: false, message: "Status must be active or inactive" });
+    }
+
+    const meta = await getMeta();
+
+    if (!meta.status) {
+      return res.status(400).json({ success: false, message: "Status column not available on vendor_bank_accounts table" });
+    }
+
+    const [result] = await db.query(
+      `UPDATE ${TABLE} SET \`${meta.status}\` = ? WHERE \`${meta.id}\` = ?`,
+      [status, id]
+    );
+
+    if (!result.affectedRows) {
+      return res.status(404).json({ success: false, message: "Vendor bank account not found" });
+    }
+
+    res.json({ success: true, message: `Vendor bank account ${status === "active" ? "activated" : "deactivated"} successfully` });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to update vendor bank account status", error: error.message });
   }
 };
 

@@ -36,12 +36,12 @@ exports.getInventoryReports = async (req, res) => {
     }
 
     if (from_date) {
-      where.push("ir.from_date >= ?");
+      where.push("ir.report_date >= ?");
       params.push(from_date);
     }
 
     if (to_date) {
-      where.push("ir.to_date <= ?");
+      where.push("ir.report_date <= ?");
       params.push(to_date);
     }
 
@@ -50,12 +50,11 @@ exports.getInventoryReports = async (req, res) => {
         (
           w.name LIKE ?
           OR w.warehouse_code LIKE ?
-          OR ir.report_type LIKE ?
         )
       `);
 
       const keyword = `%${search}%`;
-      params.push(keyword, keyword, keyword);
+      params.push(keyword, keyword);
     }
 
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
@@ -64,18 +63,14 @@ exports.getInventoryReports = async (req, res) => {
       `
       SELECT
         ir.id,
-        ir.report_type,
+        ir.report_date,
         ir.warehouse_id,
         w.name AS warehouse_name,
         w.warehouse_code,
-        ir.from_date AS report_date,
-        ir.to_date,
-        ir.generated_by,
-        ir.file_url,
-        ir.created_at,
-        0 AS total_stock_value,
-        0 AS low_stock_count,
-        0 AS expiry_count
+        ir.total_stock_value,
+        ir.low_stock_count,
+        ir.expiry_count,
+        ir.created_at
       FROM inventory_reports ir
       LEFT JOIN warehouses w ON w.id = ir.warehouse_id
       ${whereSql}
@@ -604,8 +599,8 @@ exports.generateInventoryReport = async (req, res) => {
     const userId = req.user?.id || req.user?.user_id || null;
 
     const [result] = await db.query(
-      `INSERT INTO inventory_reports (report_type, warehouse_id, from_date, to_date, generated_by) VALUES (?, ?, ?, ?, ?)`,
-      ['full_stock', warehouseId, reportDate, reportDate, userId]
+      `INSERT INTO inventory_reports (report_date, warehouse_id, total_stock_value, low_stock_count, expiry_count, data) VALUES (?, ?, ?, ?, ?, ?)`,
+      [reportDate, warehouseId, totalStockValue, lowStockItems.length, expiryItems.length, JSON.stringify(data)]
     );
 
     res.status(201).json({
@@ -633,18 +628,15 @@ exports.getInventoryReportById = async (req, res) => {
       `
       SELECT
         ir.id,
-        ir.report_type,
+        ir.report_date,
         ir.warehouse_id,
         w.name AS warehouse_name,
         w.warehouse_code,
-        ir.from_date AS report_date,
-        ir.to_date,
-        ir.generated_by,
-        ir.file_url,
-        ir.created_at,
-        0 AS total_stock_value,
-        0 AS low_stock_count,
-        0 AS expiry_count
+        ir.total_stock_value,
+        ir.low_stock_count,
+        ir.expiry_count,
+        ir.data,
+        ir.created_at
       FROM inventory_reports ir
       LEFT JOIN warehouses w ON w.id = ir.warehouse_id
       WHERE ir.id = ?

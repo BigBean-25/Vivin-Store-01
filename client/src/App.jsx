@@ -78,12 +78,27 @@ import CustomerWallets from "./pages/super-admin/CustomerWallets";
 import CustomerTransactions from "./pages/super-admin/CustomerTransactions";
 import CustomerLedgers from "./pages/super-admin/CustomerLedgers";
 import CustomerPricing from "./pages/super-admin/CustomerPricing";
+import CustomerReports from "./pages/super-admin/CustomerReports";
+import Orders from "./pages/super-admin/Orders";
+import OrderReports from "./pages/super-admin/OrderReports";
+import Delivery from "./pages/super-admin/Delivery";
+import DeliveryReports from "./pages/super-admin/DeliveryReports";
+import Finance from "./pages/super-admin/Finance";
+import GSTReports from "./pages/super-admin/GSTReports";
+import ReportsAnalytics from "./pages/super-admin/ReportsAnalytics";
+import Settings from "./pages/super-admin/Settings";
+import AccessControl from "./pages/super-admin/AccessControl";
+import OutletOperations from "./pages/super-admin/OutletOperations";
+import MarketplaceManagement from "./pages/super-admin/MarketplaceManagement";
+import NotificationManagement from "./pages/super-admin/NotificationManagement";
+import DriverDeliveryTracking from "./pages/driver/DriverDeliveryTracking";
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Login />} />
+        <Route path="/driver/delivery/:deliveryId/tracking" element={<DriverDeliveryTracking />} />
 
         <Route
           path="/super-admin/dashboard"
@@ -154,6 +169,96 @@ export default function App() {
           element={
             <ProtectedRoute>
               <CustomerPricing />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/super-admin/customer-reports"
+          element={
+            <ProtectedRoute>
+              <CustomerReports />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/super-admin/orders"
+          element={
+            <ProtectedRoute>
+              <Orders />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/super-admin/order-reports"
+          element={
+            <ProtectedRoute>
+              <OrderReports />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/super-admin/delivery"
+          element={
+            <ProtectedRoute>
+              <Delivery />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/super-admin/delivery-reports"
+          element={
+            <ProtectedRoute>
+              <DeliveryReports />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/super-admin/finance"
+          element={
+            <ProtectedRoute>
+              <Finance />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/super-admin/gst"
+          element={
+            <ProtectedRoute>
+              <GSTReports />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/super-admin/reports"
+          element={
+            <ProtectedRoute>
+              <ReportsAnalytics />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/super-admin/settings"
+          element={
+            <ProtectedRoute>
+              <Settings />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/super-admin/access-control"
+          element={
+            <ProtectedRoute>
+              <AccessControl />
             </ProtectedRoute>
           }
         />
@@ -699,6 +804,33 @@ export default function App() {
           element={
             <ProtectedRoute>
               <StockAdjustment />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/super-admin/marketplace-management"
+          element={
+            <ProtectedRoute>
+              <MarketplaceManagement />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/super-admin/notifications"
+          element={
+            <ProtectedRoute>
+              <NotificationManagement />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/super-admin/outlet-operations"
+          element={
+            <ProtectedRoute>
+              <OutletOperations />
             </ProtectedRoute>
           }
         />

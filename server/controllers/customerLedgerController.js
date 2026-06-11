@@ -1,5 +1,44 @@
 const db = require("../config/db");
 
+exports.getSummary = async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT
+        COUNT(*) AS total,
+        SUM(entry_type = 'debit') AS total_debit_entries,
+        SUM(entry_type = 'credit') AS total_credit_entries,
+        COALESCE(SUM(CASE WHEN entry_type = 'debit' THEN amount ELSE 0 END), 0) AS total_debit_amount,
+        COALESCE(SUM(CASE WHEN entry_type = 'credit' THEN amount ELSE 0 END), 0) AS total_credit_amount,
+        COALESCE(SUM(amount), 0) AS total_amount,
+        COUNT(DISTINCT customer_id) AS customers_with_ledger
+      FROM customer_ledgers
+    `);
+
+    const s = rows[0];
+
+    res.json({
+      success: true,
+      summary: {
+        total: Number(s.total),
+        total_debit_entries: Number(s.total_debit_entries),
+        total_credit_entries: Number(s.total_credit_entries),
+        total_debit_amount: Number(s.total_debit_amount),
+        total_credit_amount: Number(s.total_credit_amount),
+        total_amount: Number(s.total_amount),
+        customers_with_ledger: Number(s.customers_with_ledger),
+      },
+    });
+  } catch (error) {
+    console.error("Get customer ledger summary error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch customer ledger summary",
+      error: error.message,
+    });
+  }
+};
+
 exports.getAllCustomerLedgers = async (req, res) => {
   try {
     const [ledgers] = await db.query(`

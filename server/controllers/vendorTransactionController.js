@@ -20,17 +20,9 @@ const normalizeStatus = (value) => {
 };
 
 const normalizeTransactionType = (value) => {
-  const allowed = [
-    "purchase",
-    "payment",
-    "advance",
-    "debit",
-    "credit",
-    "adjustment",
-    "refund",
-  ];
-
-  return allowed.includes(value) ? value : "purchase";
+  const creditTypes = ["credit", "payment", "advance", "refund"];
+  if (creditTypes.includes(value)) return "credit";
+  return "debit";
 };
 
 const getColumns = async (tableName) => {
@@ -109,6 +101,9 @@ const getMeta = async () => {
     createdAt: firstColumn(columns, ["created_at"]),
     updatedAt: firstColumn(columns, ["updated_at"]),
 
+    referenceType: firstColumn(columns, ["reference_type"]),
+    referenceId: firstColumn(columns, ["reference_id"]),
+
     vendorName: firstColumn(vendorColumns, [
       "business_name",
       "vendor_name",
@@ -157,10 +152,12 @@ const getSelectFields = (meta) => [
   selectColumn("vt", meta.id, "id"),
   selectColumn("vt", meta.vendorId, "vendor_id"),
   selectColumn("vt", meta.walletId, "wallet_id"),
-  selectColumn("vt", meta.transactionType, "transaction_type", "'purchase'"),
+  selectColumn("vt", meta.transactionType, "transaction_type", "'debit'"),
   selectColumn("vt", meta.amount, "amount", "0"),
   selectColumn("vt", meta.paymentMode, "payment_mode"),
   selectColumn("vt", meta.referenceNo, "reference_no"),
+  selectColumn("vt", meta.referenceType, "reference_type"),
+  selectColumn("vt", meta.referenceId, "reference_id"),
   selectColumn("vt", meta.transactionDate, "transaction_date"),
   selectColumn("vt", meta.status, "status", "'completed'"),
   selectColumn("vt", meta.description, "description"),
@@ -182,6 +179,8 @@ const buildInsert = (meta, payload) => {
     [meta.amount, payload.amount],
     [meta.paymentMode, payload.payment_mode],
     [meta.referenceNo, payload.reference_no],
+    [meta.referenceType, payload.reference_type],
+    [meta.referenceId, payload.reference_id],
     [meta.transactionDate, payload.transaction_date],
     [meta.status, payload.status],
     [meta.description, payload.description],
@@ -209,6 +208,8 @@ const buildUpdate = (meta, payload) => {
     [meta.amount, payload.amount],
     [meta.paymentMode, payload.payment_mode],
     [meta.referenceNo, payload.reference_no],
+    [meta.referenceType, payload.reference_type],
+    [meta.referenceId, payload.reference_id],
     [meta.transactionDate, payload.transaction_date],
     [meta.status, payload.status],
     [meta.description, payload.description],
@@ -359,10 +360,12 @@ exports.createVendorTransaction = async (req, res) => {
     const {
       vendor_id,
       wallet_id = "",
-      transaction_type = "purchase",
+      transaction_type = "debit",
       amount = 0,
       payment_mode = "",
       reference_no = "",
+      reference_type = "",
+      reference_id = null,
       transaction_date = "",
       status = "completed",
       description = "",
@@ -411,6 +414,8 @@ exports.createVendorTransaction = async (req, res) => {
       amount: finalAmount,
       payment_mode: cleanValue(payment_mode),
       reference_no: cleanValue(reference_no),
+      reference_type: cleanValue(reference_type),
+      reference_id: cleanValue(reference_id),
       transaction_date: cleanValue(transaction_date) || new Date(),
       status: normalizeStatus(status),
       description: cleanValue(description),
@@ -451,10 +456,12 @@ exports.updateVendorTransaction = async (req, res) => {
     const {
       vendor_id,
       wallet_id = "",
-      transaction_type = "purchase",
+      transaction_type = "debit",
       amount = 0,
       payment_mode = "",
       reference_no = "",
+      reference_type = "",
+      reference_id = null,
       transaction_date = "",
       status = "completed",
       description = "",
@@ -520,6 +527,8 @@ exports.updateVendorTransaction = async (req, res) => {
       amount: finalAmount,
       payment_mode: cleanValue(payment_mode),
       reference_no: cleanValue(reference_no),
+      reference_type: cleanValue(reference_type),
+      reference_id: cleanValue(reference_id),
       transaction_date: cleanValue(transaction_date) || new Date(),
       status: normalizeStatus(status),
       description: cleanValue(description),
@@ -583,6 +592,91 @@ exports.deleteVendorTransaction = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to delete vendor transaction",
+      error: error.message,
+    });
+  }
+};
+
+exports.getVendorTransactionSummary = async (req, res) => {
+  try {
+    const meta = await getMeta();
+    if (!validateMeta(meta, res)) return;
+
+    const amountExpr = meta.amount ? `vt.\`${meta.amount}\`` : "0";
+    const typeExpr = meta.transactionType ? `vt.\`${meta.transactionType}\`` : "NULL";
+
+    const [rows] = await db.query(
+      `
+      SELECT
+        COUNT(*) AS total_transactions,
+        SUM(${amountExpr}) AS total_amount,
+        SUM(CASE WHEN ${typeExpr} = 'credit' THEN ${amountExpr} ELSE 0 END) AS total_credit,
+        SUM(CASE WHEN ${typeExpr} = 'debit' THEN ${amountExpr} ELSE 0 END) AS total_debit
+      FROM ${TABLE} vt
+      `
+    );
+
+    const row = rows[0] || {};
+    const totalCredit = Number(row.total_credit || 0);
+    const totalDebit = Number(row.total_debit || 0);
+
+    res.json({
+      success: true,
+      summary: {
+        total_transactions: Number(row.total_transactions || 0),
+        total_amount: Number(row.total_amount || 0),
+        total_credit: totalCredit,
+        total_debit: totalDebit,
+        net_balance: totalCredit - totalDebit,
+      },
+    });
+  } catch (error) {
+    console.error("Get vendor transaction summary error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch vendor transaction summary",
+      error: error.message,
+    });
+  }
+};
+
+exports.updateVendorTransactionStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    const meta = await getMeta();
+    if (!validateMeta(meta, res)) return;
+
+    if (!meta.status) {
+      return res.status(400).json({
+        success: false,
+        message: "Status column does not exist in vendor_transactions. Run the provided ALTER SQL to add it.",
+      });
+    }
+
+    const [[existing]] = await db.query(
+      `SELECT \`${meta.id}\` AS id FROM ${TABLE} WHERE \`${meta.id}\` = ? LIMIT 1`,
+      [id]
+    );
+
+    if (!existing) {
+      return res.status(404).json({ success: false, message: "Vendor transaction not found" });
+    }
+
+    await db.query(
+      `UPDATE ${TABLE} SET \`${meta.status}\` = ? WHERE \`${meta.id}\` = ?`,
+      [normalizeStatus(status), id]
+    );
+
+    res.json({ success: true, message: "Vendor transaction status updated successfully" });
+  } catch (error) {
+    console.error("Update vendor transaction status error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to update vendor transaction status",
       error: error.message,
     });
   }

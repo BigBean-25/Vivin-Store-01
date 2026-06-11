@@ -33,8 +33,23 @@ const customerCreditLimitRoutes = require("./routes/customerCreditLimitRoutes");
 const customerGroupRoutes = require("./routes/customerGroupRoutes");
 const customerLedgerRoutes = require("./routes/customerLedgerRoutes");
 const customerPricingRoutes = require("./routes/customerPricingRoutes");
+const customerReportRoutes = require("./routes/customerReportRoutes");
 const customerTransactionRoutes = require("./routes/customerTransactionRoutes");
 const customerWalletRoutes = require("./routes/customerWalletRoutes");
+
+const orderRoutes = require("./routes/orderRoutes");
+const orderReportRoutes = require("./routes/orderReportRoutes");
+const deliveryRoutes = require("./routes/deliveryRoutes");
+const deliveryReportRoutes = require("./routes/deliveryReportRoutes");
+const financeRoutes  = require("./routes/financeRoutes");
+const gstRoutes      = require("./routes/gstRoutes");
+const reportsRoutes  = require("./routes/reportsRoutes");
+const settingsRoutes = require("./routes/settingsRoutes");
+const accessRoutes   = require("./routes/accessRoutes");
+const publicRoutes            = require("./routes/publicRoutes");
+const outletOperationsRoutes       = require("./routes/outletOperationsRoutes");
+const marketplaceManagementRoutes  = require("./routes/marketplaceManagementRoutes");
+const notificationRoutes           = require("./routes/notificationRoutes");
 
 const productRoutes = require("./routes/productRoutes");
 const productImageRoutes = require("./routes/productImageRoutes");
@@ -145,6 +160,9 @@ app.use("/api/vendor-ledgers", vendorLedgerRoutes);
 app.use("/api/vendor-settlements", vendorSettlementRoutes);
 app.use("/api/vendor-performance", vendorPerformanceRoutes);
 app.use("/api/vendor-ratings", vendorRatingRoutes);
+app.get("/api/vendor-reports-test", (req, res) => {
+  res.json({ success: true, message: "Vendor reports test route working" });
+});
 app.use("/api/vendor-reports", vendorReportRoutes);
 
 /* Customer */
@@ -154,8 +172,33 @@ app.use("/api/customer-groups", customerGroupRoutes);
 app.use("/api/customer-pricing", customerPricingRoutes);
 app.use("/api/customer-credit-limits", customerCreditLimitRoutes);
 app.use("/api/customer-wallets", customerWalletRoutes);
+app.use("/api/customer-reports", customerReportRoutes);
 app.use("/api/customer-transactions", customerTransactionRoutes);
 app.use("/api/customer-ledgers", customerLedgerRoutes);
+
+/* Orders */
+app.use("/api/orders", orderRoutes);
+app.use("/api/order-reports", orderReportRoutes);
+app.use("/api/delivery", deliveryRoutes);
+app.use("/api/delivery-reports", deliveryReportRoutes);
+app.use("/api/finance",  financeRoutes);
+app.use("/api/gst",      gstRoutes);
+app.use("/api/reports",  reportsRoutes);
+app.use("/api/settings", settingsRoutes);
+app.use("/api/access",   accessRoutes);
+console.log("✅ Finance routes loaded at /api/finance");
+console.log("✅ GST routes loaded at /api/gst");
+console.log("✅ Reports routes loaded at /api/reports");
+console.log("✅ Settings routes loaded at /api/settings");
+console.log("✅ Access routes loaded at /api/access");
+app.use("/api/public",             publicRoutes);
+console.log("✅ Public routes loaded at /api/public");
+app.use("/api/outlet-operations",     outletOperationsRoutes);
+console.log("✅ Outlet Operations routes loaded at /api/outlet-operations");
+app.use("/api/marketplace-management", marketplaceManagementRoutes);
+console.log("✅ Marketplace Management routes loaded at /api/marketplace-management");
+app.use("/api/notifications", notificationRoutes);
+console.log("✅ Notification routes loaded at /api/notifications");
 
 /* Product Master */
 app.use("/api/categories", categoryRoutes);

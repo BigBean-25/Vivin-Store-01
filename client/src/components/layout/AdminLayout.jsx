@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, useNavigate, useLocation } from "react-router-dom";
+import api from "../../api/axios";
 import {
   ArrowLeftRight,
   BarChart3,
@@ -47,10 +48,15 @@ import {
   Wallet,
   X,
   Activity,
+  Camera,
+  ShoppingBag,
+  Store,
   TrendingUp,
 } from "lucide-react";
 
 const LOGO_SRC = "/vivin-logo.png";
+const SERVER_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
+const toAbsUrl = (url) => (!url ? "" : url.startsWith("http") ? url : `${SERVER_BASE}${url}`);
 
 const APP_URL = "/app";
 const WEBSITE_URL = "/";
@@ -513,6 +519,7 @@ const menuItems = [
   { title: "Customer Wallets", path: "/super-admin/customer-wallets", icon: Wallet, group: "CUSTOMERS" },
   { title: "Transactions", path: "/super-admin/customer-transactions", icon: ArrowLeftRight, group: "CUSTOMERS" },
   { title: "Customer Ledgers", path: "/super-admin/customer-ledgers", icon: BookOpen, group: "CUSTOMERS" },
+  { title: "Customer Reports", path: "/super-admin/customer-reports", icon: BarChart3, group: "CUSTOMERS" },
   {
     title: "Vendors",
     icon: Building2,
@@ -535,6 +542,8 @@ const menuItems = [
   { title: "Sub Categories", path: "/super-admin/sub-categories", icon: Layers3, group: "OPERATIONS" },
   { title: "Units", path: "/super-admin/units", icon: Ruler, group: "OPERATIONS" },
   { title: "Brands", path: "/super-admin/brands", icon: BadgeCheck, group: "OPERATIONS" },
+  { title: "Outlet Operations", path: "/super-admin/outlet-operations", icon: Store, group: "OPERATIONS" },
+  { title: "Marketplace Management", path: "/super-admin/marketplace-management", icon: ShoppingBag, group: "OPERATIONS" },
   {
     title: "Products",
     icon: Package,
@@ -572,7 +581,7 @@ const menuItems = [
       { title: "Documents", path: "/super-admin/procurement-documents", icon: FileText },
       { title: "Alerts & Reminders", path: "/super-admin/procurement-alerts", icon: BellRing },
       { title: "RFQs", path: "/super-admin/rfqs", icon: FileQuestion },
-      { title: "Vendor Quotations", path: "/super-admin/vendor-quotations", icon: FileText },
+      { title: "Vendor Quotations", path: "/super-admin/quotations", icon: FileText },
       { title: "Quotation Comparison", path: "/super-admin/quotation-comparison", icon: BarChart3 },
       { title: "Purchase Orders", path: "/super-admin/purchase-orders", icon: ClipboardList },
       { title: "Purchase Receipts / GRN", path: "/super-admin/purchase-receipts", icon: PackageCheck },
@@ -580,12 +589,19 @@ const menuItems = [
       { title: "Purchase Returns", path: "/super-admin/procurement-returns", icon: ArrowLeftRight },
     ],
   },
-  { title: "Warehouses", path: "/super-admin/warehouse", icon: Warehouse, group: "SUPPLY CHAIN" },
-  { title: "Warehouse Zones", path: "/super-admin/warehouse-zones", icon: Layers3, group: "SUPPLY CHAIN" },
-  { title: "Warehouse Racks", path: "/super-admin/warehouse-racks", icon: Package, group: "SUPPLY CHAIN" },
-  { title: "Warehouse Bins", path: "/super-admin/warehouse-bins", icon: Package, group: "SUPPLY CHAIN" },
-  { title: "Warehouse Staff", path: "/super-admin/warehouse-staff", icon: Users, group: "SUPPLY CHAIN" },
-  { title: "Warehouse Stock", path: "/super-admin/warehouse-stock", icon: BarChart3, group: "SUPPLY CHAIN" },
+  {
+    title: "Warehouse",
+    icon: Warehouse,
+    group: "SUPPLY CHAIN",
+    children: [
+      { title: "Warehouses",      path: "/super-admin/warehouse",       icon: Warehouse },
+      { title: "Warehouse Zones", path: "/super-admin/warehouse-zones",  icon: Layers3 },
+      { title: "Warehouse Racks", path: "/super-admin/warehouse-racks",  icon: Package },
+      { title: "Warehouse Bins",  path: "/super-admin/warehouse-bins",   icon: Package },
+      { title: "Warehouse Staff", path: "/super-admin/warehouse-staff",  icon: Users },
+      { title: "Warehouse Stock", path: "/super-admin/warehouse-stock",  icon: BarChart3 },
+    ],
+  },
   {
     title: "Inventory",
     icon: Package,
@@ -601,12 +617,30 @@ const menuItems = [
       { title: "Stock Adjustment", path: "/super-admin/stock-adjustment", icon: ClipboardCheck },
     ],
   },
-  { title: "Orders", path: "/super-admin/orders", icon: ShoppingCart, group: "SUPPLY CHAIN" },
-  { title: "Delivery", path: "/super-admin/delivery", icon: Truck, group: "SUPPLY CHAIN" },
+  {
+    title: "Orders",
+    icon: ShoppingCart,
+    group: "SUPPLY CHAIN",
+    children: [
+      { title: "All Orders",    path: "/super-admin/orders",        icon: ShoppingCart },
+      { title: "Order Reports", path: "/super-admin/order-reports", icon: BarChart3 },
+    ],
+  },
+  {
+    title: "Delivery",
+    icon: Truck,
+    group: "SUPPLY CHAIN",
+    children: [
+      { title: "All Deliveries",    path: "/super-admin/delivery",         icon: Truck },
+      { title: "Delivery Reports",  path: "/super-admin/delivery-reports", icon: BarChart3 },
+    ],
+  },
   { title: "Finance", path: "/super-admin/finance", icon: ReceiptText, group: "REPORTS" },
   { title: "GST Reports", path: "/super-admin/gst", icon: FileText, group: "REPORTS" },
-  { title: "Analytics", path: "/super-admin/analytics", icon: BarChart3, group: "REPORTS" },
+  { title: "Reports & Analytics", path: "/super-admin/reports", icon: BarChart3, group: "REPORTS" },
   { title: "Settings", path: "/super-admin/settings", icon: Settings, group: "SYSTEM" },
+  { title: "User Access Control", path: "/super-admin/access-control", icon: ShieldCheck, group: "SYSTEM" },
+  { title: "Notifications", path: "/super-admin/notifications", icon: Bell, group: "SYSTEM" },
 ];
 
 const groups = ["OVERVIEW", "CUSTOMERS", "OPERATIONS", "SUPPLY CHAIN", "REPORTS", "SYSTEM"];
@@ -691,6 +725,7 @@ export default function AdminLayout({ children }) {
   const location = useLocation();
 
   const navRef = useRef(null);
+  const mainRef = useRef(null);
   const notificationRef = useRef(null);
   const profileRef = useRef(null);
 
@@ -728,15 +763,19 @@ export default function AdminLayout({ children }) {
     () => localStorage.getItem("admin_semi_dark") === "true"
   );
   const [notifications, setNotifications] = useState(readStoredNotifications);
+  const [apiNotifs, setApiNotifs]         = useState([]);
+  const [apiUnread, setApiUnread]         = useState(0);
+  const [bellFetched, setBellFetched]     = useState(false);
 
   // FIX #1: user derived once via useState initializer — not re-computed every render
-  const [user] = useState(() => {
+  const [user, setUser] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem("user")) || {};
     } catch {
       return {};
     }
   });
+  const [avatarUploading, setAvatarUploading] = useState(false);
 
   const selectedLanguage =
     languages.find((item) => item.code === language) || languages[0];
@@ -754,6 +793,10 @@ export default function AdminLayout({ children }) {
       );
     }
   }, [location.pathname]);
+
+  useEffect(() => {
+    requestAnimationFrame(() => scrollToPageTop("instant"));
+  }, [location.pathname, location.search]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
@@ -821,10 +864,28 @@ export default function AdminLayout({ children }) {
     return () => document.removeEventListener("mousedown", closeDropdowns);
   }, []);
 
+  const fetchBellNotifs = async () => {
+    try {
+      const [rn, rs] = await Promise.allSettled([
+        api.get("/api/notifications?limit=5"),
+        api.get("/api/notifications/read-tracking/summary"),
+      ]);
+      if (rn.status === "fulfilled") {
+        const data = Array.isArray(rn.value.data?.data) ? rn.value.data.data : [];
+        setApiNotifs(data);
+      }
+      if (rs.status === "fulfilled") {
+        setApiUnread(rs.value.data?.data?.my_unread ?? 0);
+      }
+      setBellFetched(true);
+    } catch { /* silent */ }
+  };
+
   const unreadCount = useMemo(
     () => notifications.filter((item) => !item.read).length,
     [notifications]
   );
+  const displayUnread = bellFetched ? apiUnread : unreadCount;
 
   const currentTitleKey =
     flatMenuItems.find((item) => item.path && isRouteActive(location.pathname, item.path))
@@ -848,22 +909,43 @@ export default function AdminLayout({ children }) {
 
   const userInitials = (user?.name || "SA").slice(0, 2).toUpperCase();
 
+  const handleAvatarUpload = async (file) => {
+    if (!file || avatarUploading) return;
+    setAvatarUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await api.post("/api/auth/upload-avatar", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      if (res.data.success) {
+        const updated = { ...user, avatar: res.data.url };
+        setUser(updated);
+        localStorage.setItem("user", JSON.stringify(updated));
+      }
+    } catch(e) {
+      console.error("Avatar upload failed:", e.message);
+    } finally {
+      setAvatarUploading(false);
+    }
+  };
+
   const saveSidebarScroll = () => {
     if (!navRef.current) return;
     sessionStorage.setItem(SIDEBAR_SCROLL_KEY, String(navRef.current.scrollTop));
   };
 
-  const handleMenuNavigation = (event, path) => {
-    event.preventDefault();
+  const scrollToPageTop = (behavior = "instant") => {
+    window.scrollTo({ top: 0, behavior });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+    if (mainRef.current) mainRef.current.scrollTop = 0;
+  };
+
+  const handleMenuNavigation = () => {
     saveSidebarScroll();
     setNotificationOpen(false);
     setProfileOpen(false);
     setMobileSidebarOpen(false);
-    const targetPath = normalizePath(path);
-    const currentPath = normalizePath(location.pathname);
-    if (currentPath !== targetPath) {
-      navigate(targetPath);
-    }
+    requestAnimationFrame(() => scrollToPageTop("smooth"));
   };
 
   const handleParentMenuClick = (event, item) => {
@@ -915,10 +997,12 @@ export default function AdminLayout({ children }) {
         item.id === notificationId ? { ...item, read: true } : item
       )
     );
+    try { api.patch(`/api/notifications/${notificationId}/read`).then(() => fetchBellNotifs()); } catch {}
   };
 
   const markAllNotificationsRead = () => {
     setNotifications((prev) => prev.map((item) => ({ ...item, read: true })));
+    try { api.patch("/api/notifications/mark-all-read").then(() => fetchBellNotifs()); } catch {}
   };
 
   const clearAllNotifications = () => {
@@ -1078,7 +1162,7 @@ export default function AdminLayout({ children }) {
                             <Icon size={18} />
                           </span>
 
-                          {!collapsed && (
+                          {(!collapsed || mobileSidebarOpen) && (
                             <>
                               <span className="admin-nav-label">
                                 {t(item.title)}
@@ -1091,7 +1175,7 @@ export default function AdminLayout({ children }) {
                           )}
                         </button>
 
-                        {!collapsed && isOpen && (
+                        {(!collapsed || mobileSidebarOpen) && isOpen && (
                           <div className="admin-subnav">
                             {item.children.map((child) => {
                               const ChildIcon = child.icon;
@@ -1101,7 +1185,7 @@ export default function AdminLayout({ children }) {
                                   key={child.path}
                                   to={child.path}
                                   title={t(child.title)}
-                                  onClick={(event) => handleMenuNavigation(event, child.path)}
+                                  onClick={handleMenuNavigation}
                                   className={({ isActive }) =>
                                     `admin-subnav-item${isActive ? " active" : ""}`
                                   }
@@ -1124,9 +1208,9 @@ export default function AdminLayout({ children }) {
                     <NavLink
                       key={item.path}
                       to={item.path}
-                      end={item.path === "/super-admin/dashboard"}
+                      end
                       title={collapsed ? t(item.title) : undefined}
-                      onClick={(event) => handleMenuNavigation(event, item.path)}
+                      onClick={handleMenuNavigation}
                       className={({ isActive }) =>
                         `admin-nav-item${isActive ? " active" : ""}`
                       }
@@ -1135,7 +1219,7 @@ export default function AdminLayout({ children }) {
                         <Icon size={18} />
                       </span>
 
-                      {!collapsed && (
+                      {(!collapsed || mobileSidebarOpen) && (
                         <>
                           <span className="admin-nav-label">
                             {t(item.title)}
@@ -1154,7 +1238,9 @@ export default function AdminLayout({ children }) {
         <div className="admin-sidebar-footer">
           {!collapsed && (
             <div className="sidebar-user-card">
-              <span className="sidebar-avatar">{userInitials}</span>
+              <span className="sidebar-avatar">
+                {user?.avatar ? <img key={user.avatar} src={toAbsUrl(user.avatar)} alt={user.name} style={{ width:"100%", height:"100%", objectFit:"cover", borderRadius:"inherit" }} onError={e=>e.currentTarget.style.display="none"} /> : userInitials}
+              </span>
               <span className="sidebar-user-info">
                 <strong>{user?.name || t("superAdmin")}</strong>
                 <small>{user?.email || "admin@vivinstore.com"}</small>
@@ -1174,7 +1260,7 @@ export default function AdminLayout({ children }) {
         </div>
       </aside>
 
-      <main className="admin-main">
+      <main className="admin-main" ref={mainRef}>
         <header className="admin-topbar">
           <div className="topbar-left">
             <button
@@ -1213,6 +1299,8 @@ export default function AdminLayout({ children }) {
               {t("systemOnline")}
             </div>
 
+            <img src={LOGO_SRC} alt="Vivin" className="mobile-topbar-logo" />
+
             <button
               className="round-action-btn"
               type="button"
@@ -1228,13 +1316,15 @@ export default function AdminLayout({ children }) {
                 type="button"
                 title={t("notifications")}
                 onClick={() => {
-                  setNotificationOpen((prev) => !prev);
+                  const opening = !notificationOpen;
+                  setNotificationOpen(opening);
                   setProfileOpen(false);
+                  if (opening) fetchBellNotifs();
                 }}
               >
                 <Bell size={18} />
-                {unreadCount > 0 && (
-                  <span className="notification-count">{unreadCount}</span>
+                {displayUnread > 0 && (
+                  <span className="notification-count">{displayUnread}</span>
                 )}
               </button>
 
@@ -1244,7 +1334,7 @@ export default function AdminLayout({ children }) {
                     <div>
                       <h3>{t("notifications")}</h3>
                       <p>
-                        {unreadCount} {t("unreadUpdates")}
+                        {displayUnread} {t("unreadUpdates")}
                       </p>
                     </div>
                     <button
@@ -1276,13 +1366,28 @@ export default function AdminLayout({ children }) {
                   </div>
 
                   <div className="notification-list">
-                    {notifications.length === 0 ? (
+                    {(bellFetched ? apiNotifs : notifications).length === 0 ? (
                       <div className="empty-notification">
                         <Bell size={24} />
                         <span>{t("noNotifications")}</span>
                       </div>
+                    ) : bellFetched ? (
+                      apiNotifs.map((item) => (
+                        <button
+                          type="button"
+                          key={item.id}
+                          className="notification-item"
+                          onClick={() => handleNotificationClick(item.id)}
+                        >
+                          <span className="notification-dot" />
+                          <span className="notification-content">
+                            <strong>{item.title}</strong>
+                            <small>{item.message ? item.message.slice(0,60) : ""}</small>
+                            <em>{item.created_at ? new Date(item.created_at).toLocaleDateString() : ""}</em>
+                          </span>
+                        </button>
+                      ))
                     ) : (
-                      // FIX #3: Render using titleKey/messageKey through t() for multilingual support
                       notifications.map((item) => (
                         <button
                           type="button"
@@ -1303,6 +1408,12 @@ export default function AdminLayout({ children }) {
                         </button>
                       ))
                     )}
+                    <div style={{ borderTop:"1px solid #2a2d3e", padding:"8px 12px", textAlign:"center" }}>
+                      <a href="/super-admin/notifications" onClick={() => setNotificationOpen(false)}
+                        style={{ fontSize:12, color:"#F8C400", textDecoration:"none", fontWeight:500 }}>
+                        View All Notifications →
+                      </a>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1317,7 +1428,9 @@ export default function AdminLayout({ children }) {
                   setNotificationOpen(false);
                 }}
               >
-                <span className="top-avatar">{userInitials}</span>
+                <span className="top-avatar">
+                  {user?.avatar ? <img key={user.avatar} src={toAbsUrl(user.avatar)} alt={user.name} style={{ width:"100%", height:"100%", objectFit:"cover", borderRadius:"inherit" }} onError={e=>e.currentTarget.style.display="none"} /> : userInitials}
+                </span>
                 <span className="profile-trigger-text">
                   <strong>{user?.name || t("superAdmin")}</strong>
                   <small>{user?.email || "admin@vivinstore.com"}</small>
@@ -1328,7 +1441,13 @@ export default function AdminLayout({ children }) {
               {profileOpen && (
                 <div className="profile-dropdown">
                   <div className="profile-dropdown-head">
-                    <span className="profile-large-avatar">{userInitials}</span>
+                    <span className="profile-large-avatar" style={{ position:"relative", overflow:"visible" }}>
+                      {user?.avatar ? <img key={user.avatar} src={toAbsUrl(user.avatar)} alt={user.name} style={{ width:"100%", height:"100%", objectFit:"cover", borderRadius:"inherit" }} onError={e=>e.currentTarget.style.display="none"} /> : userInitials}
+                      <label title="Change photo" style={{ position:"absolute", bottom:-4, right:-4, width:22, height:22, background:"#111318", borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", cursor: avatarUploading ? "not-allowed":"pointer", border:"2px solid #fff", opacity: avatarUploading ? 0.5:1 }}>
+                        <Camera size={11} color="#F8C400" />
+                        <input type="file" accept="image/jpeg,image/jpg,image/png,image/webp" style={{ display:"none" }} disabled={avatarUploading} onChange={e=>{ if(e.target.files?.[0]) handleAvatarUpload(e.target.files[0]); e.target.value=""; }} />
+                      </label>
+                    </span>
                     <div>
                       <h3>{user?.name || t("superAdmin")}</h3>
                       <p>{user?.email || "admin@vivinstore.com"}</p>
@@ -1693,7 +1812,9 @@ export default function AdminLayout({ children }) {
             </div>
 
             <div className="logout-confirm-user">
-              <div className="logout-confirm-avatar">{userInitials}</div>
+              <div className="logout-confirm-avatar">
+                {user?.avatar ? <img key={user.avatar} src={toAbsUrl(user.avatar)} alt={user.name} style={{ width:"100%", height:"100%", objectFit:"cover", borderRadius:"inherit" }} onError={e=>e.currentTarget.style.display="none"} /> : userInitials}
+              </div>
               <div>
                 <strong>{user?.name || t("superAdmin")}</strong>
                 <small>{user?.email || "admin@vivinstore.com"}</small>
@@ -2797,6 +2918,10 @@ const css = `
     display: none;
   }
 
+  .mobile-topbar-logo {
+    display: none;
+  }
+
   .logout-confirm-overlay {
     position: fixed;
     inset: 0;
@@ -3119,7 +3244,7 @@ const css = `
     }
   }
 
-  @media (max-width: 540px) {
+  @media (max-width: 900px) {
     .admin-main {
       width: 100%;
       margin-left: 0;
@@ -3206,6 +3331,21 @@ const css = `
 
     .logout-confirm-actions {
       grid-template-columns: 1fr;
+    }
+
+    .mobile-topbar-logo {
+      display: block;
+      height: 38px;
+      width: auto;
+      object-fit: contain;
+      flex-shrink: 0;
+      border-radius: 6px;
+    }
+
+    .mobile-sidebar-open .admin-nav-dropdown.open .admin-subnav {
+      display: grid !important;
+      max-height: 700px;
+      overflow: hidden;
     }
   }
 

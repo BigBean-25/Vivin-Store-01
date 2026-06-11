@@ -342,7 +342,7 @@ export default function VendorContacts() {
                     <option value="">Select Vendor</option>
                     {vendors.map((vendor) => (
                       <option key={vendor.id} value={vendor.id}>
-                        {vendor.name || vendor.vendor_name || `Vendor #${vendor.id}`}
+                        {vendor.business_name || `Vendor #${vendor.id}`}
                       </option>
                     ))}
                   </select>
@@ -489,7 +489,7 @@ export default function VendorContacts() {
             <option value="">All Vendors</option>
             {vendors.map((vendor) => (
               <option key={vendor.id} value={vendor.id}>
-                {vendor.name || vendor.vendor_name || `Vendor #${vendor.id}`}
+                {vendor.business_name || `Vendor #${vendor.id}`}
               </option>
             ))}
           </select>

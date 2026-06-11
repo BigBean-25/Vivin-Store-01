@@ -7,9 +7,12 @@ import {
   ArrowUpRight,
   Bell,
   Building2,
+  ExternalLink,
+  Globe2,
   IndianRupee,
   Package,
   RefreshCw,
+  Settings as SettingsIcon,
   ShoppingCart,
   TrendingUp,
   Truck,
@@ -28,6 +31,9 @@ const BRAND = {
   white: "#FFFFFF",
   border: "#DBDADE",
 };
+
+const SERVER_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
+const toAbsUrl = (url) => (!url ? "" : url.startsWith("http") ? url : `${SERVER_BASE}${url}`);
 
 const HERO_TRUCK_SRC = "/vivin-login-hero-light.png";
 
@@ -287,6 +293,7 @@ export default function Dashboard() {
   const [summary, setSummary] = useState(null);
   const [loadingSummary, setLoadingSummary] = useState(true);
   const [summaryError, setSummaryError] = useState("");
+  const [webProfile, setWebProfile] = useState(null);
   const [language, setLanguage] = useState(getDashboardLanguage);
 
   const t = useCallback(
@@ -348,10 +355,18 @@ export default function Dashboard() {
     }
   }, [t]);
 
+  const loadWebProfile = useCallback(async () => {
+    try {
+      const res = await API.get("/api/settings/customer-website");
+      if (res.data.success) setWebProfile(res.data.data || {});
+    } catch {}
+  }, []);
+
   useEffect(() => {
     getProfile();
     getSummary();
-  }, [getProfile, getSummary]);
+    loadWebProfile();
+  }, [getProfile, getSummary, loadWebProfile]);
 
   const moduleCards = useMemo(() => {
     const modules = summary?.modules || {};
@@ -609,8 +624,109 @@ export default function Dashboard() {
             )}
           </div>
         </section>
+
+        <WebsiteProfileCard profile={webProfile} onManage={() => navigate("/super-admin/settings")} />
+
       </div>
     </AdminLayout>
+  );
+}
+
+function WebsiteProfileCard({ profile, onManage }) {
+  if (profile === null) return null;
+
+  const SOCIAL_KEYS = ["facebook_url","instagram_url","youtube_url","linkedin_url","twitter_url","whatsapp_url"];
+  const activeSocialCount = SOCIAL_KEYS.filter((k) => profile[k]).length;
+  const configured = profile.website_url || profile.website_avatar || profile.support_email;
+
+  return (
+    <section style={{ marginTop: 24 }}>
+      <div style={{ marginBottom: 12 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: BRAND.muted, textTransform: "uppercase" }}>Customer Channel</span>
+        <h2 style={{ fontSize: 18, fontWeight: 900, color: BRAND.black, margin: "2px 0 0" }}>Customer Website Profile</h2>
+        <p style={{ fontSize: 13, color: BRAND.muted, margin: "2px 0 0" }}>Public-facing brand identity and contact links</p>
+      </div>
+
+      <div style={{ background: "#fff", border: `1.5px solid ${BRAND.border}`, borderRadius: 16, padding: 24, display: "flex", gap: 24, alignItems: "flex-start", flexWrap: "wrap" }}>
+        {configured ? (
+          <>
+            {/* Avatar / Logo */}
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, minWidth: 90 }}>
+              {profile.website_avatar ? (
+                <img
+                  key={toAbsUrl(profile.website_avatar)}
+                  src={toAbsUrl(profile.website_avatar)}
+                  alt="Website Avatar"
+                  style={{ width: 72, height: 72, borderRadius: "50%", objectFit: "cover", border: `2px solid ${BRAND.yellow}` }}
+                  onError={(e) => { e.currentTarget.style.display = "none"; }}
+                />
+              ) : (
+                <div style={{ width: 72, height: 72, borderRadius: "50%", background: BRAND.cream, display: "flex", alignItems: "center", justifyContent: "center", border: `2px dashed ${BRAND.yellowDark}` }}>
+                  <Globe2 size={28} color={BRAND.yellowDark} />
+                </div>
+              )}
+              {profile.website_logo && (
+                <img
+                  key={toAbsUrl(profile.website_logo)}
+                  src={toAbsUrl(profile.website_logo)}
+                  alt="Logo"
+                  style={{ maxHeight: 32, maxWidth: 90, objectFit: "contain" }}
+                  onError={(e) => { e.currentTarget.style.display = "none"; }}
+                />
+              )}
+            </div>
+
+            {/* Info */}
+            <div style={{ flex: 1, minWidth: 200 }}>
+              {profile.website_url && (
+                <a
+                  href={toAbsUrl(profile.website_url)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ display: "inline-flex", alignItems: "center", gap: 5, fontWeight: 800, fontSize: 14, color: BRAND.black, textDecoration: "none", marginBottom: 8 }}
+                >
+                  <Globe2 size={14} color={BRAND.yellowDark} />
+                  {profile.website_url}
+                  <ExternalLink size={12} color={BRAND.muted} />
+                </a>
+              )}
+
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 8 }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 5, background: activeSocialCount > 0 ? "#DCFCE7" : "#F3F4F6", color: activeSocialCount > 0 ? "#166534" : BRAND.muted, borderRadius: 20, padding: "3px 12px", fontSize: 12, fontWeight: 700 }}>
+                  {activeSocialCount} / {SOCIAL_KEYS.length} Social Links Active
+                </span>
+              </div>
+
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 16, fontSize: 13, color: BRAND.muted }}>
+                {profile.support_email && <span>✉ {profile.support_email}</span>}
+                {profile.support_phone && <span>📞 {profile.support_phone}</span>}
+              </div>
+
+              {profile.address && (
+                <div style={{ marginTop: 6, fontSize: 12, color: BRAND.muted }}>📍 {profile.address}</div>
+              )}
+            </div>
+          </>
+        ) : (
+          <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 12, color: BRAND.muted }}>
+            <Globe2 size={32} color={BRAND.border} />
+            <span style={{ fontSize: 13 }}>Customer website profile not configured</span>
+          </div>
+        )}
+
+        {/* Action */}
+        <div style={{ alignSelf: "flex-start" }}>
+          <button
+            type="button"
+            onClick={onManage}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "9px 18px", borderRadius: 8, background: BRAND.black, color: "#fff", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 700 }}
+          >
+            <SettingsIcon size={14} />
+            Manage Website Settings
+          </button>
+        </div>
+      </div>
+    </section>
   );
 }
 

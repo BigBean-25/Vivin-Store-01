@@ -23,23 +23,20 @@ import {
 const initialForm = {
   vendor_id: "",
   wallet_id: "",
-  transaction_type: "purchase",
+  transaction_type: "debit",
   amount: "",
   payment_mode: "Cash",
   reference_no: "",
+  reference_type: "",
+  reference_id: "",
   transaction_date: "",
   status: "completed",
   description: "",
 };
 
 const transactionTypes = [
-  { value: "purchase", label: "Purchase" },
-  { value: "payment", label: "Payment" },
-  { value: "advance", label: "Advance" },
-  { value: "debit", label: "Debit" },
-  { value: "credit", label: "Credit" },
-  { value: "adjustment", label: "Adjustment" },
-  { value: "refund", label: "Refund" },
+  { value: "debit", label: "Debit (Purchase / Expense)" },
+  { value: "credit", label: "Credit (Payment / Refund)" },
 ];
 
 const paymentModes = ["Cash", "Bank Transfer", "UPI", "Cheque", "Card", "Wallet", "Other"];
@@ -195,17 +192,14 @@ export default function VendorTransactions() {
   const stats = useMemo(() => {
     const total = transactions.length;
 
-    const creditTypes = ["payment", "advance", "credit", "refund"];
-    const debitTypes = ["purchase", "debit", "adjustment"];
-
     const totalCredit = transactions.reduce((sum, item) => {
-      return creditTypes.includes(item.transaction_type)
+      return item.transaction_type === "credit"
         ? sum + Number(item.amount || 0)
         : sum;
     }, 0);
 
     const totalDebit = transactions.reduce((sum, item) => {
-      return debitTypes.includes(item.transaction_type)
+      return item.transaction_type === "debit"
         ? sum + Number(item.amount || 0)
         : sum;
     }, 0);
@@ -262,7 +256,7 @@ export default function VendorTransactions() {
     setFormData({
       vendor_id: String(transaction.vendor_id || ""),
       wallet_id: String(transaction.wallet_id || ""),
-      transaction_type: transaction.transaction_type || "purchase",
+      transaction_type: transaction.transaction_type || "debit",
       amount: transaction.amount ?? "",
       payment_mode: transaction.payment_mode || "Cash",
       reference_no: transaction.reference_no || "",
@@ -679,8 +673,8 @@ export default function VendorTransactions() {
 
                 <tbody>
                   {transactions.map((transaction) => {
-                    const type = transaction.transaction_type || "purchase";
-                    const isCredit = ["payment", "advance", "credit", "refund"].includes(type);
+                    const type = transaction.transaction_type || "debit";
+                    const isCredit = type === "credit";
 
                     return (
                       <tr key={transaction.id}>

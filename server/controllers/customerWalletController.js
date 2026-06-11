@@ -1,5 +1,44 @@
 const db = require("../config/db");
 
+exports.getSummary = async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT
+        COUNT(*) AS total,
+        SUM(status = 'active') AS active,
+        SUM(status = 'inactive') AS inactive,
+        SUM(status = 'blocked') AS blocked,
+        COALESCE(SUM(balance), 0) AS total_balance,
+        COALESCE(SUM(credit_balance), 0) AS total_credit_balance,
+        SUM(balance > 0) AS wallets_with_balance
+      FROM customer_wallets
+    `);
+
+    const s = rows[0];
+
+    res.json({
+      success: true,
+      summary: {
+        total: Number(s.total),
+        active: Number(s.active),
+        inactive: Number(s.inactive),
+        blocked: Number(s.blocked),
+        total_balance: Number(s.total_balance),
+        total_credit_balance: Number(s.total_credit_balance),
+        wallets_with_balance: Number(s.wallets_with_balance),
+      },
+    });
+  } catch (error) {
+    console.error("Get customer wallet summary error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch customer wallet summary",
+      error: error.message,
+    });
+  }
+};
+
 exports.getAllCustomerWallets = async (req, res) => {
   try {
     const [wallets] = await db.query(`
@@ -99,6 +138,52 @@ exports.getWalletByCustomer = async (req, res) => {
     });
   } catch (error) {
     console.error("Get customer wallet error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch customer wallet",
+      error: error.message,
+    });
+  }
+};
+
+exports.getWalletById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [[wallet]] = await db.query(
+      `
+      SELECT
+        cw.id,
+        cw.customer_id,
+        c.business_name AS customer_name,
+        c.customer_code,
+        cw.balance,
+        cw.credit_balance,
+        cw.status,
+        cw.created_at,
+        cw.updated_at
+      FROM customer_wallets cw
+      LEFT JOIN customers c ON cw.customer_id = c.id
+      WHERE cw.id = ?
+      LIMIT 1
+      `,
+      [id]
+    );
+
+    if (!wallet) {
+      return res.status(404).json({
+        success: false,
+        message: "Customer wallet not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      wallet,
+    });
+  } catch (error) {
+    console.error("Get customer wallet by id error:", error);
 
     res.status(500).json({
       success: false,
@@ -348,17 +433,23 @@ exports.addWalletTransaction = async (req, res) => {
   }
 };
 
-exports.deleteCustomerWallet = async (req, res) => {
+exports.updateStatus = async (req, res) => {
   try {
     const { id } = req.params;
+    const { status } = req.body;
+
+    const validStatuses = ["active", "inactive", "blocked"];
+
+    if (!status || !validStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid status required: active, inactive, blocked",
+      });
+    }
 
     const [result] = await db.query(
-      `
-      UPDATE customer_wallets
-      SET status = 'inactive'
-      WHERE id = ?
-      `,
-      [id]
+      "UPDATE customer_wallets SET status = ? WHERE id = ?",
+      [status, id]
     );
 
     if (result.affectedRows === 0) {
@@ -367,6 +458,49 @@ exports.deleteCustomerWallet = async (req, res) => {
         message: "Customer wallet not found",
       });
     }
+
+    res.json({
+      success: true,
+      message: "Customer wallet status updated successfully",
+    });
+  } catch (error) {
+    console.error("Update customer wallet status error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to update customer wallet status",
+      error: error.message,
+    });
+  }
+};
+
+exports.deleteCustomerWallet = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [[wallet]] = await db.query(
+      `SELECT balance, credit_balance FROM customer_wallets WHERE id = ? LIMIT 1`,
+      [id]
+    );
+
+    if (!wallet) {
+      return res.status(404).json({
+        success: false,
+        message: "Customer wallet not found",
+      });
+    }
+
+    if (Number(wallet.balance) > 0 || Number(wallet.credit_balance) > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot deactivate: wallet has a balance of \u20b9${wallet.balance} and credit balance of \u20b9${wallet.credit_balance}. Clear the balance first.`,
+      });
+    }
+
+    await db.query(
+      "UPDATE customer_wallets SET status = 'inactive' WHERE id = ?",
+      [id]
+    );
 
     res.json({
       success: true,

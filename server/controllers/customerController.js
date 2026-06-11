@@ -1,5 +1,46 @@
 const db = require("../config/db");
 
+const generateCustomerCode = () => {
+  const ts = Date.now().toString(36).toUpperCase();
+  const rand = Math.random().toString(36).substr(2, 4).toUpperCase();
+  return `CUS-${ts}-${rand}`;
+};
+
+exports.getSummary = async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT
+        COUNT(*) AS total,
+        SUM(status = 'active') AS active,
+        SUM(status = 'pending') AS pending,
+        SUM(status IN ('inactive', 'blocked')) AS blocked_inactive,
+        COALESCE(SUM(credit_limit), 0) AS total_credit_limit
+      FROM customers
+    `);
+
+    const s = rows[0];
+
+    res.json({
+      success: true,
+      summary: {
+        total: Number(s.total),
+        active: Number(s.active),
+        pending: Number(s.pending),
+        blocked_inactive: Number(s.blocked_inactive),
+        total_credit_limit: Number(s.total_credit_limit),
+      },
+    });
+  } catch (error) {
+    console.error("Get customer summary error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch customer summary",
+      error: error.message,
+    });
+  }
+};
+
 exports.getCustomers = async (req, res) => {
   try {
     const [customers] = await db.query(`
@@ -62,7 +103,7 @@ exports.createCustomer = async (req, res) => {
       });
     }
 
-    const finalCustomerCode = customer_code || `CUS-${Date.now()}`;
+    const finalCustomerCode = (customer_code && customer_code.trim()) || generateCustomerCode();
 
     const [result] = await db.query(
       `
@@ -178,7 +219,6 @@ exports.updateCustomer = async (req, res) => {
     const [result] = await db.query(
       `
       UPDATE customers SET
-        customer_code = ?,
         business_name = ?,
         contact_person = ?,
         email = ?,
@@ -192,7 +232,6 @@ exports.updateCustomer = async (req, res) => {
       WHERE id = ?
       `,
       [
-        customer_code || null,
         business_name,
         contact_person || null,
         email || null,
@@ -224,6 +263,47 @@ exports.updateCustomer = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to update customer",
+      error: error.message,
+    });
+  }
+};
+
+exports.updateStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    const validStatuses = ["active", "inactive", "pending", "blocked"];
+
+    if (!status || !validStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid status required: active, inactive, pending, blocked",
+      });
+    }
+
+    const [result] = await db.query(
+      "UPDATE customers SET status = ? WHERE id = ?",
+      [status, id]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Customer not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Customer status updated successfully",
+    });
+  } catch (error) {
+    console.error("Update customer status error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to update customer status",
       error: error.message,
     });
   }

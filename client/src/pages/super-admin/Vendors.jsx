@@ -25,6 +25,7 @@ const BRAND = {
 };
 
 const initialForm = {
+  vendor_code: "",
   business_name: "",
   contact_person: "",
   email: "",
@@ -36,7 +37,7 @@ const initialForm = {
   state: "",
   pincode: "",
   credit_days: 0,
-  status: "active",
+  status: "pending",
 };
 
 export default function Vendors() {
@@ -97,6 +98,7 @@ export default function Vendors() {
     setEditingVendorId(vendor.id);
 
     setFormData({
+      vendor_code: vendor.vendor_code || "",
       business_name: vendor.business_name || "",
       contact_person: vendor.contact_person || "",
       email: vendor.email || "",
@@ -108,7 +110,7 @@ export default function Vendors() {
       state: vendor.state || "",
       pincode: vendor.pincode || "",
       credit_days: vendor.credit_days || 0,
-      status: vendor.status || "active",
+      status: vendor.status || "pending",
     });
 
     setShowForm(true);
@@ -157,16 +159,25 @@ export default function Vendors() {
     }
   };
 
-  const handleDeactivate = async (id) => {
-    const confirmDelete = window.confirm("Are you sure you want to deactivate this vendor?");
-
-    if (!confirmDelete) return;
-
+  const handleToggleStatus = async (vendor, newStatus) => {
+    if (!window.confirm(`Set vendor "${vendor.business_name}" to ${newStatus}?`)) return;
     try {
-      await API.delete(`/api/vendors/${id}`);
+      setError("");
+      await API.patch(`/api/vendors/${vendor.id}/status`, { status: newStatus });
       fetchVendors();
     } catch (err) {
-      setError(err.response?.data?.message || "Failed to deactivate vendor");
+      setError(err.response?.data?.message || "Failed to update vendor status");
+    }
+  };
+
+  const handleDelete = async (vendor) => {
+    if (!window.confirm(`Permanently delete vendor "${vendor.business_name}"? This cannot be undone.`)) return;
+    try {
+      setError("");
+      await API.delete(`/api/vendors/${vendor.id}`);
+      fetchVendors();
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to delete vendor");
     }
   };
 
@@ -239,6 +250,16 @@ export default function Vendors() {
 
             <form onSubmit={handleSubmit}>
               <div className="form-grid">
+                <div className="form-group">
+                  <label>Vendor Code</label>
+                  <input
+                    name="vendor_code"
+                    value={formData.vendor_code}
+                    onChange={handleChange}
+                    placeholder="VEN-001 (auto-generated if blank)"
+                  />
+                </div>
+
                 <div className="form-group">
                   <label>Business Name *</label>
                   <input
@@ -486,10 +507,33 @@ export default function Vendors() {
                             <Edit3 size={16} />
                           </button>
 
+                          {vendor.status !== "active" && (
+                            <button
+                              type="button"
+                              onClick={() => handleToggleStatus(vendor, "active")}
+                              title="Activate"
+                              style={{height:'36px',padding:'0 10px',borderRadius:'12px',border:'none',cursor:'pointer',fontWeight:700,fontSize:'11px',background:'#effbf4',color:'#1c9b58'}}
+                            >
+                              Activate
+                            </button>
+                          )}
+
+                          {vendor.status === "active" && (
+                            <button
+                              type="button"
+                              onClick={() => handleToggleStatus(vendor, "inactive")}
+                              title="Deactivate"
+                              style={{height:'36px',padding:'0 10px',borderRadius:'12px',border:'none',cursor:'pointer',fontWeight:700,fontSize:'11px',background:'#fff7e6',color:'#9a7400'}}
+                            >
+                              Deactivate
+                            </button>
+                          )}
+
                           <button
                             className="delete-btn"
                             type="button"
-                            onClick={() => handleDeactivate(vendor.id)}
+                            onClick={() => handleDelete(vendor)}
+                            title="Delete permanently"
                           >
                             <Trash2 size={16} />
                           </button>

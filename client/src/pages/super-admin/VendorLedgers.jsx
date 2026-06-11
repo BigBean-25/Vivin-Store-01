@@ -28,25 +28,22 @@ import {
 const initialForm = {
   vendor_id: "",
   transaction_id: "",
-  entry_type: "purchase",
+  entry_type: "debit",
   ledger_date: "",
   opening_balance: "",
   debit_amount: "",
   credit_amount: "",
   closing_balance: "",
+  reference_type: "",
+  reference_id: "",
   reference_no: "",
   description: "",
   status: "active",
 };
 
 const entryTypes = [
-  { value: "opening", label: "Opening" },
-  { value: "purchase", label: "Purchase" },
-  { value: "payment", label: "Payment" },
-  { value: "debit", label: "Debit" },
-  { value: "credit", label: "Credit" },
-  { value: "adjustment", label: "Adjustment" },
-  { value: "closing", label: "Closing" },
+  { value: "debit", label: "Debit (Purchase / Expense)" },
+  { value: "credit", label: "Credit (Payment / Refund)" },
 ];
 
 const statusOptions = [
@@ -296,18 +293,10 @@ export default function VendorLedgers() {
         );
 
         if (selectedTransaction) {
-          next.entry_type = selectedTransaction.transaction_type || "purchase";
-          next.debit_amount = ["purchase", "debit", "adjustment"].includes(
-            selectedTransaction.transaction_type
-          )
-            ? selectedTransaction.amount || ""
-            : "";
-
-          next.credit_amount = ["payment", "advance", "credit", "refund"].includes(
-            selectedTransaction.transaction_type
-          )
-            ? selectedTransaction.amount || ""
-            : "";
+          const txType = selectedTransaction.transaction_type === "credit" ? "credit" : "debit";
+          next.entry_type = txType;
+          next.debit_amount = txType === "debit" ? selectedTransaction.amount || "" : "";
+          next.credit_amount = txType === "credit" ? selectedTransaction.amount || "" : "";
 
           next.reference_no = selectedTransaction.reference_no || "";
           next.description = selectedTransaction.description || "";
@@ -327,7 +316,7 @@ export default function VendorLedgers() {
     setFormData({
       vendor_id: String(ledger.vendor_id || ""),
       transaction_id: String(ledger.transaction_id || ""),
-      entry_type: ledger.entry_type || "purchase",
+      entry_type: ledger.entry_type || "debit",
       ledger_date: ledger.ledger_date ? String(ledger.ledger_date).slice(0, 10) : todayDate(),
       opening_balance: ledger.opening_balance ?? "",
       debit_amount: ledger.debit_amount ?? "",

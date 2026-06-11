@@ -21,13 +21,9 @@ import {
 
 const initialForm = {
   vendor_id: "",
-  opening_balance: "",
   wallet_balance: "",
-  credit_limit: "",
-  outstanding_amount: "",
-  advance_amount: "",
+  hold_amount: "",
   status: "active",
-  notes: "",
 };
 
 const formatCurrency = (value) => {
@@ -151,8 +147,8 @@ export default function VendorWallets() {
       0
     );
 
-    const totalOutstanding = wallets.reduce(
-      (sum, item) => sum + Number(item.outstanding_amount || 0),
+    const totalHoldAmount = wallets.reduce(
+      (sum, item) => sum + Number(item.hold_amount || 0),
       0
     );
 
@@ -160,7 +156,7 @@ export default function VendorWallets() {
       total,
       active,
       totalBalance,
-      totalOutstanding,
+      totalHoldAmount,
     };
   }, [wallets]);
 
@@ -189,13 +185,9 @@ export default function VendorWallets() {
 
     setFormData({
       vendor_id: String(wallet.vendor_id || ""),
-      opening_balance: wallet.opening_balance ?? "",
       wallet_balance: wallet.wallet_balance ?? "",
-      credit_limit: wallet.credit_limit ?? "",
-      outstanding_amount: wallet.outstanding_amount ?? "",
-      advance_amount: wallet.advance_amount ?? "",
-      status: isActiveStatus(wallet.status) ? "active" : "inactive",
-      notes: wallet.notes || "",
+      hold_amount: wallet.hold_amount ?? "",
+      status: wallet.status || "active",
     });
 
     setShowForm(true);
@@ -228,13 +220,9 @@ export default function VendorWallets() {
 
       const payload = {
         vendor_id: formData.vendor_id,
-        opening_balance: makeNumber(formData.opening_balance),
         wallet_balance: makeNumber(formData.wallet_balance),
-        credit_limit: makeNumber(formData.credit_limit),
-        outstanding_amount: makeNumber(formData.outstanding_amount),
-        advance_amount: makeNumber(formData.advance_amount),
+        hold_amount: makeNumber(formData.hold_amount),
         status: formData.status,
-        notes: formData.notes.trim(),
       };
 
       if (editingId) {
@@ -335,8 +323,8 @@ export default function VendorWallets() {
             icon={ArrowUpCircle}
           />
           <StatCard
-            title="Outstanding"
-            value={formatCurrency(stats.totalOutstanding)}
+            title="Hold Amount"
+            value={formatCurrency(stats.totalHoldAmount)}
             icon={ArrowDownCircle}
           />
         </div>
@@ -377,19 +365,8 @@ export default function VendorWallets() {
                   <select name="status" value={formData.status} onChange={handleChange}>
                     <option value="active">Active</option>
                     <option value="inactive">Inactive</option>
+                    <option value="blocked">Blocked</option>
                   </select>
-                </div>
-
-                <div className="form-group">
-                  <label>Opening Balance</label>
-                  <input
-                    type="number"
-                    name="opening_balance"
-                    value={formData.opening_balance}
-                    onChange={handleChange}
-                    placeholder="0.00"
-                    step="0.01"
-                  />
                 </div>
 
                 <div className="form-group">
@@ -405,49 +382,14 @@ export default function VendorWallets() {
                 </div>
 
                 <div className="form-group">
-                  <label>Credit Limit</label>
+                  <label>Hold Amount</label>
                   <input
                     type="number"
-                    name="credit_limit"
-                    value={formData.credit_limit}
+                    name="hold_amount"
+                    value={formData.hold_amount}
                     onChange={handleChange}
                     placeholder="0.00"
                     step="0.01"
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label>Outstanding Amount</label>
-                  <input
-                    type="number"
-                    name="outstanding_amount"
-                    value={formData.outstanding_amount}
-                    onChange={handleChange}
-                    placeholder="0.00"
-                    step="0.01"
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label>Advance Amount</label>
-                  <input
-                    type="number"
-                    name="advance_amount"
-                    value={formData.advance_amount}
-                    onChange={handleChange}
-                    placeholder="0.00"
-                    step="0.01"
-                  />
-                </div>
-
-                <div className="form-group full">
-                  <label>Notes</label>
-                  <textarea
-                    name="notes"
-                    value={formData.notes}
-                    onChange={handleChange}
-                    placeholder="Optional remarks"
-                    rows={3}
                   />
                 </div>
               </div>
@@ -501,6 +443,7 @@ export default function VendorWallets() {
             <option value="">All Status</option>
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
+            <option value="blocked">Blocked</option>
           </select>
 
           <div className="api-chip">
@@ -532,11 +475,8 @@ export default function VendorWallets() {
                 <thead>
                   <tr>
                     <th>Vendor</th>
-                    <th>Opening</th>
                     <th>Wallet Balance</th>
-                    <th>Credit Limit</th>
-                    <th>Outstanding</th>
-                    <th>Advance</th>
+                    <th>Hold Amount</th>
                     <th>Status</th>
                     <th>Created</th>
                     <th className="right">Action</th>
@@ -545,7 +485,7 @@ export default function VendorWallets() {
 
                 <tbody>
                   {wallets.map((wallet) => {
-                    const active = isActiveStatus(wallet.status);
+                    const statusClass = wallet.status || "active";
 
                     return (
                       <tr key={wallet.id}>
@@ -557,31 +497,21 @@ export default function VendorWallets() {
                           <div className="small-text">{wallet.vendor_code || "-"}</div>
                         </td>
 
-                        <td>{formatCurrency(wallet.opening_balance)}</td>
-
                         <td>
                           <div className="amount-positive">
                             {formatCurrency(wallet.wallet_balance)}
                           </div>
                         </td>
 
-                        <td>{formatCurrency(wallet.credit_limit)}</td>
-
-                        <td>
-                          <div className="amount-danger">
-                            {formatCurrency(wallet.outstanding_amount)}
-                          </div>
-                        </td>
-
                         <td>
                           <div className="amount-info">
-                            {formatCurrency(wallet.advance_amount)}
+                            {formatCurrency(wallet.hold_amount)}
                           </div>
                         </td>
 
                         <td>
-                          <span className={`status-badge ${active ? "active" : "inactive"}`}>
-                            {active ? "Active" : "Inactive"}
+                          <span className={`status-badge ${statusClass}`}>
+                            {statusClass.charAt(0).toUpperCase() + statusClass.slice(1)}
                           </span>
                         </td>
 
@@ -1078,6 +1008,11 @@ const css = `
   .status-badge.inactive {
     background: #fff1f2;
     color: #e11d48;
+  }
+
+  .status-badge.blocked {
+    background: #fef3c7;
+    color: #92400e;
   }
 
   .action-buttons {

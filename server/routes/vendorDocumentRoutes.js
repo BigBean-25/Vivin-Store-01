@@ -5,10 +5,12 @@ const path = require("path");
 const fs = require("fs");
 
 const {
+  getVendorDocumentSummary,
   getVendorDocuments,
   getVendorDocumentById,
   createVendorDocument,
   updateVendorDocument,
+  updateVendorDocumentStatus,
   deleteVendorDocument,
 } = require("../controllers/vendorDocumentController");
 
@@ -60,10 +62,12 @@ const upload = multer({
   },
 });
 
+router.get("/summary", protect, getVendorDocumentSummary);
 router.get("/", protect, getVendorDocuments);
 router.post("/", protect, upload.single("document"), createVendorDocument);
 router.get("/:id", protect, getVendorDocumentById);
 router.put("/:id", protect, upload.single("document"), updateVendorDocument);
+router.patch("/:id/status", protect, updateVendorDocumentStatus);
 router.delete("/:id", protect, deleteVendorDocument);
 
 module.exports = router;

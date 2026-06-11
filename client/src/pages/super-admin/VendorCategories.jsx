@@ -178,6 +178,18 @@ export default function VendorCategories() {
     }
   };
 
+  const handleToggleStatus = async (category, newStatus) => {
+    if (!window.confirm(`${newStatus === "active" ? "Activate" : "Deactivate"} vendor category "${category.name}"?`)) return;
+    try {
+      setError("");
+      await API.patch(`/api/vendor-categories/${category.id}/status`, { status: newStatus });
+      showSuccess(`Vendor category ${newStatus === "active" ? "activated" : "deactivated"} successfully`);
+      fetchVendorCategories();
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to update vendor category status");
+    }
+  };
+
   const handleDelete = async (category) => {
     if (Number(category.vendor_count || 0) > 0) {
       setError("This category is linked with vendors. Cannot delete.");
@@ -421,6 +433,26 @@ export default function VendorCategories() {
                             >
                               <Edit3 size={16} />
                             </button>
+
+                            {active ? (
+                              <button
+                                type="button"
+                                onClick={() => handleToggleStatus(category, "inactive")}
+                                title="Deactivate"
+                                style={{height:'37px',padding:'0 10px',borderRadius:'13px',border:'none',cursor:'pointer',fontWeight:700,fontSize:'11px',background:'#fff7e6',color:'#9a7400'}}
+                              >
+                                Deactivate
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleToggleStatus(category, "active")}
+                                title="Activate"
+                                style={{height:'37px',padding:'0 10px',borderRadius:'13px',border:'none',cursor:'pointer',fontWeight:700,fontSize:'11px',background:'#ecfdf5',color:'#047857'}}
+                              >
+                                Activate
+                              </button>
+                            )}
 
                             <button
                               type="button"

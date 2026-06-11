@@ -1,6 +1,7 @@
 const express = require("express");
 
 const {
+  getSummary,
   getAllCustomerTransactions,
   getTransactionsByCustomer,
   getTransactionById,
@@ -11,6 +12,7 @@ const { protect } = require("../middleware/authMiddleware");
 
 const router = express.Router();
 
+router.get("/summary", protect, getSummary);
 router.get("/", protect, getAllCustomerTransactions);
 router.get("/customer/:customerId", protect, getTransactionsByCustomer);
 router.get("/:id", protect, getTransactionById);

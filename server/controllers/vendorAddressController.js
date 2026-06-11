@@ -1,6 +1,7 @@
 const db = require("../config/db");
 
 const allowedAddressTypes = ["billing", "shipping", "warehouse", "office"];
+const VALID_STATUSES = ["active", "inactive"];
 
 const cleanValue = (value) => {
   if (value === undefined || value === null || value === "") return null;
@@ -18,6 +19,43 @@ const normalizeBoolean = (value) => {
 const normalizeAddressType = (value) => {
   if (allowedAddressTypes.includes(value)) return value;
   return "office";
+};
+
+exports.getVendorAddressSummary = async (req, res) => {
+  try {
+    const [[statusCol]] = await db.query(`SHOW COLUMNS FROM vendor_addresses LIKE 'status'`);
+    const hasStatus = !!statusCol;
+
+    let summary;
+    if (hasStatus) {
+      [[summary]] = await db.query(`
+        SELECT
+          COUNT(id)                                                      AS total_addresses,
+          SUM(CASE WHEN is_default = 1       THEN 1 ELSE 0 END)          AS default_addresses,
+          SUM(CASE WHEN address_type = 'billing'   THEN 1 ELSE 0 END)    AS billing_count,
+          SUM(CASE WHEN address_type = 'shipping'  THEN 1 ELSE 0 END)    AS shipping_count,
+          SUM(CASE WHEN address_type = 'warehouse' THEN 1 ELSE 0 END)    AS warehouse_count,
+          SUM(CASE WHEN address_type = 'office'    THEN 1 ELSE 0 END)    AS office_count,
+          SUM(CASE WHEN status = 'active'          THEN 1 ELSE 0 END)    AS active_count,
+          SUM(CASE WHEN status = 'inactive'        THEN 1 ELSE 0 END)    AS inactive_count
+        FROM vendor_addresses
+      `);
+    } else {
+      [[summary]] = await db.query(`
+        SELECT
+          COUNT(id)                                                      AS total_addresses,
+          SUM(CASE WHEN is_default = 1       THEN 1 ELSE 0 END)          AS default_addresses,
+          SUM(CASE WHEN address_type = 'billing'   THEN 1 ELSE 0 END)    AS billing_count,
+          SUM(CASE WHEN address_type = 'shipping'  THEN 1 ELSE 0 END)    AS shipping_count,
+          SUM(CASE WHEN address_type = 'warehouse' THEN 1 ELSE 0 END)    AS warehouse_count,
+          SUM(CASE WHEN address_type = 'office'    THEN 1 ELSE 0 END)    AS office_count
+        FROM vendor_addresses
+      `);
+    }
+    res.json({ success: true, summary });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to fetch vendor address summary", error: error.message });
+  }
 };
 
 exports.getVendorAddresses = async (req, res) => {
@@ -388,6 +426,32 @@ exports.updateVendorAddress = async (req, res) => {
       message: "Failed to update vendor address",
       error: error.message,
     });
+  }
+};
+
+exports.updateVendorAddressStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!VALID_STATUSES.includes(status)) {
+      return res.status(400).json({ success: false, message: "Status must be active or inactive" });
+    }
+
+    const [[statusCol]] = await db.query(`SHOW COLUMNS FROM vendor_addresses LIKE 'status'`);
+    if (!statusCol) {
+      return res.status(400).json({ success: false, message: "Status column not available. Run the optional ALTER TABLE first." });
+    }
+
+    const [result] = await db.query(`UPDATE vendor_addresses SET status = ? WHERE id = ?`, [status, id]);
+
+    if (!result.affectedRows) {
+      return res.status(404).json({ success: false, message: "Vendor address not found" });
+    }
+
+    res.json({ success: true, message: `Vendor address ${status === "active" ? "activated" : "deactivated"} successfully` });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to update vendor address status", error: error.message });
   }
 };
 

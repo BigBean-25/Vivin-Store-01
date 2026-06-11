@@ -10,8 +10,10 @@ const cleanValue = (value) => {
   return value;
 };
 
+const VALID_STATUSES = ["active", "expired", "inactive", "rejected"];
+
 const normalizeStatus = (value) => {
-  if (value === "expired" || value === "inactive" || value === "rejected") return value;
+  if (VALID_STATUSES.includes(value)) return value;
   return "active";
 };
 
@@ -107,9 +109,9 @@ const getMeta = async () => {
       "valid_to",
     ]),
 
-    status: firstColumn(columns, ["status"]),
+    status: firstColumn(columns, ["status", "verification_status"]),
     notes: firstColumn(columns, ["notes", "remarks"]),
-    createdAt: firstColumn(columns, ["created_at"]),
+    createdAt: firstColumn(columns, ["created_at", "uploaded_at"]),
     updatedAt: firstColumn(columns, ["updated_at"]),
 
     vendorName: firstColumn(vendorColumns, [
@@ -198,6 +200,28 @@ const buildUpdate = (meta, payload) => {
   });
 
   return { sets, values };
+};
+
+exports.getVendorDocumentSummary = async (req, res) => {
+  try {
+    const meta = await getMeta();
+
+    const countFields = [
+      `COUNT(\`${meta.id}\`) AS total_documents`,
+      meta.status ? `SUM(CASE WHEN \`${meta.status}\` = 'active'   THEN 1 ELSE 0 END) AS active_documents`   : `0 AS active_documents`,
+      meta.status ? `SUM(CASE WHEN \`${meta.status}\` = 'expired'  THEN 1 ELSE 0 END) AS expired_documents`  : `0 AS expired_documents`,
+      meta.status ? `SUM(CASE WHEN \`${meta.status}\` = 'inactive' THEN 1 ELSE 0 END) AS inactive_documents` : `0 AS inactive_documents`,
+      meta.status ? `SUM(CASE WHEN \`${meta.status}\` = 'rejected' THEN 1 ELSE 0 END) AS rejected_documents` : `0 AS rejected_documents`,
+      meta.expiryDate
+        ? `SUM(CASE WHEN \`${meta.expiryDate}\` IS NOT NULL AND \`${meta.expiryDate}\` >= CURDATE() AND \`${meta.expiryDate}\` <= DATE_ADD(CURDATE(), INTERVAL 30 DAY) THEN 1 ELSE 0 END) AS expiring_soon`
+        : `0 AS expiring_soon`,
+    ].join(",\n      ");
+
+    const [[summary]] = await db.query(`SELECT ${countFields} FROM ${TABLE}`);
+    res.json({ success: true, summary });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to fetch vendor document summary", error: error.message });
+  }
 };
 
 exports.getVendorDocuments = async (req, res) => {
@@ -557,6 +581,36 @@ exports.updateVendorDocument = async (req, res) => {
       message: "Failed to update vendor document",
       error: error.message,
     });
+  }
+};
+
+exports.updateVendorDocumentStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!VALID_STATUSES.includes(status)) {
+      return res.status(400).json({ success: false, message: "Status must be active, expired, inactive or rejected" });
+    }
+
+    const meta = await getMeta();
+
+    if (!meta.status) {
+      return res.status(400).json({ success: false, message: "Status column not available. Run the required ALTER TABLE first." });
+    }
+
+    const [result] = await db.query(
+      `UPDATE ${TABLE} SET \`${meta.status}\` = ? WHERE \`${meta.id}\` = ?`,
+      [status, id]
+    );
+
+    if (!result.affectedRows) {
+      return res.status(404).json({ success: false, message: "Vendor document not found" });
+    }
+
+    res.json({ success: true, message: `Vendor document status updated to ${status}` });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to update vendor document status", error: error.message });
   }
 };
 

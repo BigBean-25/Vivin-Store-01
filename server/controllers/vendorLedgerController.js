@@ -15,8 +15,8 @@ const toNumber = (value, fallback = 0) => {
 };
 
 const normalizeEntryType = (value) => {
-  const allowed = ["opening", "purchase", "payment", "debit", "credit", "adjustment", "closing"];
-  return allowed.includes(value) ? value : "purchase";
+  if (value === "credit") return "credit";
+  return "debit";
 };
 
 const normalizeStatus = (value) => {
@@ -70,6 +70,8 @@ const getMeta = async () => {
       "date",
     ]),
 
+    amount: firstColumn(columns, ["amount"]),
+
     openingBalance: firstColumn(columns, [
       "opening_balance",
       "opening_amount",
@@ -92,10 +94,14 @@ const getMeta = async () => {
 
     closingBalance: firstColumn(columns, [
       "closing_balance",
+      "balance_after",
       "balance",
       "current_balance",
       "running_balance",
     ]),
+
+    referenceType: firstColumn(columns, ["reference_type"]),
+    referenceId: firstColumn(columns, ["reference_id"]),
 
     referenceNo: firstColumn(columns, [
       "reference_no",
@@ -142,24 +148,40 @@ const validateMeta = (meta, res) => {
   return true;
 };
 
-const getSelectFields = (meta) => [
-  selectColumn("vl", meta.id, "id"),
-  selectColumn("vl", meta.vendorId, "vendor_id"),
-  selectColumn("vl", meta.transactionId, "transaction_id"),
-  selectColumn("vl", meta.entryType, "entry_type", "'purchase'"),
-  selectColumn("vl", meta.ledgerDate, "ledger_date"),
-  selectColumn("vl", meta.openingBalance, "opening_balance", "0"),
-  selectColumn("vl", meta.debitAmount, "debit_amount", "0"),
-  selectColumn("vl", meta.creditAmount, "credit_amount", "0"),
-  selectColumn("vl", meta.closingBalance, "closing_balance", "0"),
-  selectColumn("vl", meta.referenceNo, "reference_no"),
-  selectColumn("vl", meta.description, "description"),
-  selectColumn("vl", meta.status, "status", "'active'"),
-  selectColumn("vl", meta.createdAt, "created_at"),
-  selectColumn("vl", meta.updatedAt, "updated_at"),
-  selectColumn("v", meta.vendorName, "vendor_name"),
-  selectColumn("v", meta.vendorCode, "vendor_code"),
-];
+const getSelectFields = (meta) => {
+  const amountExpr = meta.amount ? `vl.\`${meta.amount}\`` : "0";
+  const entryTypeExpr = meta.entryType ? `vl.\`${meta.entryType}\`` : "NULL";
+
+  const debitExpr = meta.amount && meta.entryType
+    ? `CASE WHEN ${entryTypeExpr} = 'debit' THEN ${amountExpr} ELSE 0 END`
+    : (meta.debitAmount ? `vl.\`${meta.debitAmount}\`` : "0");
+
+  const creditExpr = meta.amount && meta.entryType
+    ? `CASE WHEN ${entryTypeExpr} = 'credit' THEN ${amountExpr} ELSE 0 END`
+    : (meta.creditAmount ? `vl.\`${meta.creditAmount}\`` : "0");
+
+  return [
+    selectColumn("vl", meta.id, "id"),
+    selectColumn("vl", meta.vendorId, "vendor_id"),
+    selectColumn("vl", meta.transactionId, "transaction_id"),
+    selectColumn("vl", meta.entryType, "entry_type", "'debit'"),
+    selectColumn("vl", meta.ledgerDate, "ledger_date"),
+    `${amountExpr} AS amount`,
+    `${debitExpr} AS debit_amount`,
+    `${creditExpr} AS credit_amount`,
+    selectColumn("vl", meta.openingBalance, "opening_balance", "0"),
+    selectColumn("vl", meta.closingBalance, "closing_balance", "0"),
+    selectColumn("vl", meta.referenceType, "reference_type"),
+    selectColumn("vl", meta.referenceId, "reference_id"),
+    selectColumn("vl", meta.referenceNo, "reference_no"),
+    selectColumn("vl", meta.description, "description"),
+    selectColumn("vl", meta.status, "status", "'active'"),
+    selectColumn("vl", meta.createdAt, "created_at"),
+    selectColumn("vl", meta.updatedAt, "updated_at"),
+    selectColumn("v", meta.vendorName, "vendor_name"),
+    selectColumn("v", meta.vendorCode, "vendor_code"),
+  ];
+};
 
 const buildInsert = (meta, payload) => {
   const fields = [];
@@ -171,10 +193,13 @@ const buildInsert = (meta, payload) => {
     [meta.transactionId, payload.transaction_id],
     [meta.entryType, payload.entry_type],
     [meta.ledgerDate, payload.ledger_date],
+    [meta.amount, payload.amount],
+    [meta.closingBalance, payload.closing_balance],
     [meta.openingBalance, payload.opening_balance],
     [meta.debitAmount, payload.debit_amount],
     [meta.creditAmount, payload.credit_amount],
-    [meta.closingBalance, payload.closing_balance],
+    [meta.referenceType, payload.reference_type],
+    [meta.referenceId, payload.reference_id],
     [meta.referenceNo, payload.reference_no],
     [meta.description, payload.description],
     [meta.status, payload.status],
@@ -199,10 +224,13 @@ const buildUpdate = (meta, payload) => {
     [meta.transactionId, payload.transaction_id],
     [meta.entryType, payload.entry_type],
     [meta.ledgerDate, payload.ledger_date],
+    [meta.amount, payload.amount],
+    [meta.closingBalance, payload.closing_balance],
     [meta.openingBalance, payload.opening_balance],
     [meta.debitAmount, payload.debit_amount],
     [meta.creditAmount, payload.credit_amount],
-    [meta.closingBalance, payload.closing_balance],
+    [meta.referenceType, payload.reference_type],
+    [meta.referenceId, payload.reference_id],
     [meta.referenceNo, payload.reference_no],
     [meta.description, payload.description],
     [meta.status, payload.status],
@@ -354,12 +382,16 @@ exports.createVendorLedger = async (req, res) => {
     const {
       vendor_id,
       transaction_id = "",
-      entry_type = "purchase",
+      entry_type = "debit",
       ledger_date = "",
-      opening_balance = 0,
+      amount = 0,
       debit_amount = 0,
       credit_amount = 0,
-      closing_balance = 0,
+      opening_balance = 0,
+      closing_balance = "",
+      balance_after = "",
+      reference_type = "",
+      reference_id = null,
       reference_no = "",
       description = "",
       status = "active",
@@ -392,22 +424,45 @@ exports.createVendorLedger = async (req, res) => {
       });
     }
 
-    const debit = toNumber(debit_amount);
-    const credit = toNumber(credit_amount);
+    const finalEntryType = normalizeEntryType(entry_type);
+    let finalAmount = toNumber(amount);
+    if (!finalAmount) {
+      finalAmount = finalEntryType === "credit"
+        ? toNumber(credit_amount)
+        : toNumber(debit_amount);
+    }
+
+    if (finalAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Amount must be greater than 0",
+      });
+    }
+
     const opening = toNumber(opening_balance);
-    const closing = closing_balance === "" || closing_balance === null
-      ? opening + debit - credit
-      : toNumber(closing_balance);
+    let finalBalanceAfter;
+    if (balance_after !== "" && balance_after !== null) {
+      finalBalanceAfter = toNumber(balance_after);
+    } else if (closing_balance !== "" && closing_balance !== null) {
+      finalBalanceAfter = toNumber(closing_balance);
+    } else {
+      finalBalanceAfter = finalEntryType === "debit"
+        ? opening + finalAmount
+        : opening - finalAmount;
+    }
 
     const payload = {
       vendor_id,
       transaction_id: cleanValue(transaction_id),
-      entry_type: normalizeEntryType(entry_type),
+      entry_type: finalEntryType,
       ledger_date: cleanValue(ledger_date) || new Date(),
-      opening_balance: opening,
-      debit_amount: debit,
-      credit_amount: credit,
-      closing_balance: closing,
+      amount: finalAmount,
+      closing_balance: finalBalanceAfter,
+      opening_balance: opening || null,
+      debit_amount: finalEntryType === "debit" ? finalAmount : 0,
+      credit_amount: finalEntryType === "credit" ? finalAmount : 0,
+      reference_type: cleanValue(reference_type),
+      reference_id: cleanValue(reference_id),
       reference_no: cleanValue(reference_no),
       description: cleanValue(description),
       status: normalizeStatus(status),
@@ -448,12 +503,16 @@ exports.updateVendorLedger = async (req, res) => {
     const {
       vendor_id,
       transaction_id = "",
-      entry_type = "purchase",
+      entry_type = "debit",
       ledger_date = "",
-      opening_balance = 0,
+      amount = 0,
       debit_amount = 0,
       credit_amount = 0,
-      closing_balance = 0,
+      opening_balance = 0,
+      closing_balance = "",
+      balance_after = "",
+      reference_type = "",
+      reference_id = null,
       reference_no = "",
       description = "",
       status = "active",
@@ -503,22 +562,45 @@ exports.updateVendorLedger = async (req, res) => {
       });
     }
 
-    const debit = toNumber(debit_amount);
-    const credit = toNumber(credit_amount);
+    const finalEntryType = normalizeEntryType(entry_type);
+    let finalAmount = toNumber(amount);
+    if (!finalAmount) {
+      finalAmount = finalEntryType === "credit"
+        ? toNumber(credit_amount)
+        : toNumber(debit_amount);
+    }
+
+    if (finalAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Amount must be greater than 0",
+      });
+    }
+
     const opening = toNumber(opening_balance);
-    const closing = closing_balance === "" || closing_balance === null
-      ? opening + debit - credit
-      : toNumber(closing_balance);
+    let finalBalanceAfter;
+    if (balance_after !== "" && balance_after !== null) {
+      finalBalanceAfter = toNumber(balance_after);
+    } else if (closing_balance !== "" && closing_balance !== null) {
+      finalBalanceAfter = toNumber(closing_balance);
+    } else {
+      finalBalanceAfter = finalEntryType === "debit"
+        ? opening + finalAmount
+        : opening - finalAmount;
+    }
 
     const payload = {
       vendor_id,
       transaction_id: cleanValue(transaction_id),
-      entry_type: normalizeEntryType(entry_type),
+      entry_type: finalEntryType,
       ledger_date: cleanValue(ledger_date) || new Date(),
-      opening_balance: opening,
-      debit_amount: debit,
-      credit_amount: credit,
-      closing_balance: closing,
+      amount: finalAmount,
+      closing_balance: finalBalanceAfter,
+      opening_balance: opening || null,
+      debit_amount: finalEntryType === "debit" ? finalAmount : 0,
+      credit_amount: finalEntryType === "credit" ? finalAmount : 0,
+      reference_type: cleanValue(reference_type),
+      reference_id: cleanValue(reference_id),
       reference_no: cleanValue(reference_no),
       description: cleanValue(description),
       status: normalizeStatus(status),
@@ -1090,16 +1172,15 @@ const getAutoLedgerLatestBalance = async (meta, vendorId) => {
   return safeNumber(row?.closing_balance);
 };
 
-const autoLedgerExists = async (meta, vendorId, entryType, referenceNo) => {
-  if (!meta.referenceNo) return false;
+const autoLedgerExists = async (meta, vendorId, referenceType, referenceId) => {
+  if (!meta.referenceType || !meta.referenceId) return false;
 
-  const conditions = [`\`${meta.vendorId}\` = ?`, `\`${meta.referenceNo}\` = ?`];
-  const values = [vendorId, referenceNo];
-
-  if (meta.entryType) {
-    conditions.push(`\`${meta.entryType}\` = ?`);
-    values.push(entryType);
-  }
+  const conditions = [
+    `\`${meta.vendorId}\` = ?`,
+    `\`${meta.referenceType}\` = ?`,
+    `\`${meta.referenceId}\` = ?`,
+  ];
+  const values = [vendorId, referenceType, referenceId];
 
   const [[row]] = await db.query(
     `
@@ -1118,16 +1199,20 @@ const insertAutoLedger = async (meta, transaction, openingBalance) => {
   const debit = safeNumber(transaction.debit);
   const credit = safeNumber(transaction.credit);
   const closingBalance = openingBalance + debit - credit;
+  const amount = Math.max(debit, credit);
 
   const payload = {
     vendor_id: transaction.vendor_id,
     transaction_id: null,
     entry_type: transaction.entry_type,
     ledger_date: transaction.ledger_date,
+    amount,
+    closing_balance: closingBalance,
     opening_balance: openingBalance,
     debit_amount: debit,
     credit_amount: credit,
-    closing_balance: closingBalance,
+    reference_type: transaction.reference_type,
+    reference_id: transaction.source_id,
     reference_no: transaction.reference_no,
     description: transaction.description,
     status: "active",
@@ -1168,10 +1253,10 @@ const getAutoLedgerTransactions = async (vendorId = "") => {
         po.vendor_id,
         po.id AS source_id,
         po.po_date AS ledger_date,
-        'purchase' AS entry_type,
+        'debit' AS entry_type,
         po.total_amount AS debit,
         0 AS credit,
-        CONCAT('AUTO-PO-', po.po_number) AS reference_no,
+        'purchase_order' AS reference_type,
         CONCAT('Auto Purchase Order - ', po.po_number) AS description,
         po.created_at,
         1 AS sort_order
@@ -1185,10 +1270,10 @@ const getAutoLedgerTransactions = async (vendorId = "") => {
         pp.vendor_id,
         pp.id AS source_id,
         pp.payment_date AS ledger_date,
-        'payment' AS entry_type,
+        'credit' AS entry_type,
         0 AS debit,
         pp.amount AS credit,
-        CONCAT('AUTO-PAY-', pp.id) AS reference_no,
+        'procurement_payment' AS reference_type,
         CONCAT(
           'Auto Vendor Payment - ',
           COALESCE(NULLIF(pp.reference_number, ''), CONCAT('PAY-', pp.id))
@@ -1205,10 +1290,10 @@ const getAutoLedgerTransactions = async (vendorId = "") => {
         pr.vendor_id,
         pr.id AS source_id,
         pr.return_date AS ledger_date,
-        'adjustment' AS entry_type,
+        'credit' AS entry_type,
         0 AS debit,
         COALESCE(SUM(pri.quantity * COALESCE(poi.unit_price, 0)), 0) AS credit,
-        CONCAT('AUTO-RET-', pr.return_number) AS reference_no,
+        'procurement_return' AS reference_type,
         CONCAT('Auto Purchase Return - ', pr.return_number) AS description,
         pr.created_at,
         3 AS sort_order
@@ -1249,7 +1334,7 @@ const syncAutoLedgerProcess = async (vendorId = "") => {
   let skipped = 0;
 
   for (const transaction of transactions) {
-    if (!transaction.vendor_id || !transaction.reference_no) {
+    if (!transaction.vendor_id || !transaction.source_id) {
       skipped += 1;
       continue;
     }
@@ -1257,8 +1342,8 @@ const syncAutoLedgerProcess = async (vendorId = "") => {
     const exists = await autoLedgerExists(
       meta,
       transaction.vendor_id,
-      transaction.entry_type,
-      transaction.reference_no
+      transaction.reference_type,
+      transaction.source_id
     );
 
     if (exists) {
@@ -1500,11 +1585,14 @@ exports.getVendorPaymentAgeingReport = async (req, res) => {
 const recalculateSingleVendorLedger = async (vendorId) => {
   const meta = await getMeta();
 
-  if (!meta.id || !meta.vendorId || !meta.openingBalance || !meta.closingBalance) {
+  if (!meta.id || !meta.vendorId || !meta.closingBalance) {
     throw new Error(
-      "vendor_ledgers table must have id, vendor_id, opening_balance and closing_balance columns"
+      "vendor_ledgers table must have id, vendor_id and balance_after (closing_balance) columns"
     );
   }
+
+  const amountExpr = meta.amount ? `vl.\`${meta.amount}\`` : "0";
+  const entryTypeExpr = meta.entryType ? `vl.\`${meta.entryType}\`` : "NULL";
 
   const orderBy = meta.ledgerDate
     ? `vl.\`${meta.ledgerDate}\` ASC, vl.\`${meta.id}\` ASC`
@@ -1514,9 +1602,9 @@ const recalculateSingleVendorLedger = async (vendorId) => {
     `
       SELECT
         vl.\`${meta.id}\` AS id,
-        ${meta.openingBalance ? `vl.\`${meta.openingBalance}\`` : "0"} AS opening_balance,
-        ${meta.debitAmount ? `vl.\`${meta.debitAmount}\`` : "0"} AS debit_amount,
-        ${meta.creditAmount ? `vl.\`${meta.creditAmount}\`` : "0"} AS credit_amount
+        ${amountExpr} AS amount,
+        CASE WHEN ${entryTypeExpr} = 'debit' THEN ${amountExpr} ELSE 0 END AS debit_amount,
+        CASE WHEN ${entryTypeExpr} = 'credit' THEN ${amountExpr} ELSE 0 END AS credit_amount
       FROM ${TABLE} vl
       WHERE vl.\`${meta.vendorId}\` = ?
       ORDER BY ${orderBy}
@@ -1532,23 +1620,28 @@ const recalculateSingleVendorLedger = async (vendorId) => {
     };
   }
 
-  let runningBalance = Number(rows[0]?.opening_balance || 0);
+  let runningBalance = 0;
 
   for (const row of rows) {
-    const openingBalance = runningBalance;
     const debit = Number(row.debit_amount || 0);
     const credit = Number(row.credit_amount || 0);
-    const closingBalance = openingBalance + debit - credit;
+    const closingBalance = runningBalance + debit - credit;
+
+    const setters = [`\`${meta.closingBalance}\` = ?`];
+    const setValues = [closingBalance];
+
+    if (meta.openingBalance) {
+      setters.unshift(`\`${meta.openingBalance}\` = ?`);
+      setValues.unshift(runningBalance);
+    }
 
     await db.query(
       `
         UPDATE ${TABLE}
-        SET
-          \`${meta.openingBalance}\` = ?,
-          \`${meta.closingBalance}\` = ?
+        SET ${setters.join(", ")}
         WHERE \`${meta.id}\` = ?
       `,
-      [openingBalance, closingBalance, row.id]
+      [...setValues, row.id]
     );
 
     runningBalance = closingBalance;

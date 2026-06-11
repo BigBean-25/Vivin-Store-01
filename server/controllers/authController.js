@@ -115,6 +115,26 @@ exports.login = async (req, res) => {
   }
 };
 
+exports.uploadAvatar = async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, message: "No file uploaded" });
+    const url = `/uploads/avatars/${req.file.filename}`;
+    await db.query("UPDATE users SET avatar = ? WHERE id = ?", [url, req.user.id]);
+    const [rows] = await db.query(
+      `SELECT id, name, email, phone, avatar, user_type, status,
+              r.name AS role_name, r.display_name AS role_display_name
+       FROM users u
+       LEFT JOIN user_roles ur ON u.id = ur.user_id
+       LEFT JOIN roles r ON ur.role_id = r.id
+       WHERE u.id = ? LIMIT 1`,
+      [req.user.id]
+    );
+    res.json({ success: true, url, user: rows[0] || {} });
+  } catch(e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+};
+
 exports.me = async (req, res) => {
   try {
     const [users] = await db.query(

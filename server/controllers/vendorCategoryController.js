@@ -16,6 +16,22 @@ const normalizeStatus = (status, fallback = "active") => {
   return fallback;
 };
 
+exports.getVendorCategorySummary = async (req, res) => {
+  try {
+    const [[summary]] = await db.query(`
+      SELECT
+        COUNT(id)                                                  AS total_categories,
+        SUM(CASE WHEN status = 'active'   THEN 1 ELSE 0 END)       AS active_categories,
+        SUM(CASE WHEN status = 'inactive' THEN 1 ELSE 0 END)       AS inactive_categories,
+        (SELECT COUNT(id) FROM vendors WHERE category_id IS NOT NULL) AS linked_vendors
+      FROM vendor_categories
+    `);
+    res.json({ success: true, summary });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to fetch vendor category summary", error: error.message });
+  }
+};
+
 exports.getVendorCategories = async (req, res) => {
   try {
     const { search = "", status = "" } = req.query;
@@ -254,6 +270,27 @@ exports.updateVendorCategory = async (req, res) => {
       message: "Failed to update vendor category",
       error: error.message,
     });
+  }
+};
+
+exports.updateVendorCategoryStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({ success: false, message: "Status must be active or inactive" });
+    }
+
+    const [result] = await db.query(`UPDATE vendor_categories SET status = ? WHERE id = ?`, [status, id]);
+
+    if (!result.affectedRows) {
+      return res.status(404).json({ success: false, message: "Vendor category not found" });
+    }
+
+    res.json({ success: true, message: `Vendor category ${status === "active" ? "activated" : "deactivated"} successfully` });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to update vendor category status", error: error.message });
   }
 };
 

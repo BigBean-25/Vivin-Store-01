@@ -15,6 +15,7 @@ const toNumber = (value, fallback = 0) => {
 
 const normalizeStatus = (value) => {
   if (value === "inactive" || value === 0 || value === "0") return "inactive";
+  if (value === "blocked") return "blocked";
   return "active";
 };
 
@@ -74,6 +75,8 @@ const getMeta = async () => {
       "paid_advance",
     ]),
 
+    holdAmount: firstColumn(columns, ["hold_amount"]),
+
     status: firstColumn(columns, ["status"]),
     notes: firstColumn(columns, ["notes", "remarks"]),
     createdAt: firstColumn(columns, ["created_at"]),
@@ -108,6 +111,7 @@ const getSelectFields = (meta) => [
   selectColumn("vw", meta.vendorId, "vendor_id"),
   selectColumn("vw", meta.openingBalance, "opening_balance", "0"),
   selectColumn("vw", meta.walletBalance, "wallet_balance", "0"),
+  selectColumn("vw", meta.holdAmount, "hold_amount", "0"),
   selectColumn("vw", meta.creditLimit, "credit_limit", "0"),
   selectColumn("vw", meta.outstandingAmount, "outstanding_amount", "0"),
   selectColumn("vw", meta.advanceAmount, "advance_amount", "0"),
@@ -128,6 +132,7 @@ const buildInsert = (meta, payload) => {
     [meta.vendorId, payload.vendor_id],
     [meta.openingBalance, payload.opening_balance],
     [meta.walletBalance, payload.wallet_balance],
+    [meta.holdAmount, payload.hold_amount],
     [meta.creditLimit, payload.credit_limit],
     [meta.outstandingAmount, payload.outstanding_amount],
     [meta.advanceAmount, payload.advance_amount],
@@ -154,6 +159,7 @@ const buildUpdate = (meta, payload) => {
     [meta.vendorId, payload.vendor_id],
     [meta.openingBalance, payload.opening_balance],
     [meta.walletBalance, payload.wallet_balance],
+    [meta.holdAmount, payload.hold_amount],
     [meta.creditLimit, payload.credit_limit],
     [meta.outstandingAmount, payload.outstanding_amount],
     [meta.advanceAmount, payload.advance_amount],
@@ -169,6 +175,27 @@ const buildUpdate = (meta, payload) => {
   });
 
   return { sets, values };
+};
+
+exports.getVendorWalletSummary = async (req, res) => {
+  try {
+    const meta = await getMeta();
+    if (!validateMeta(meta, res)) return;
+
+    const countFields = [
+      `COUNT(\`${meta.id}\`) AS total_wallets`,
+      meta.status ? `SUM(CASE WHEN \`${meta.status}\` = 'active'   THEN 1 ELSE 0 END) AS active_wallets`   : `0 AS active_wallets`,
+      meta.status ? `SUM(CASE WHEN \`${meta.status}\` = 'inactive' THEN 1 ELSE 0 END) AS inactive_wallets` : `0 AS inactive_wallets`,
+      meta.status ? `SUM(CASE WHEN \`${meta.status}\` = 'blocked'  THEN 1 ELSE 0 END) AS blocked_wallets`  : `0 AS blocked_wallets`,
+      meta.walletBalance ? `SUM(\`${meta.walletBalance}\`) AS total_balance`     : `0 AS total_balance`,
+      meta.holdAmount    ? `SUM(\`${meta.holdAmount}\`)    AS total_hold_amount` : `0 AS total_hold_amount`,
+    ].join(",\n      ");
+
+    const [[summary]] = await db.query(`SELECT ${countFields} FROM ${TABLE}`);
+    res.json({ success: true, summary });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to fetch vendor wallet summary", error: error.message });
+  }
 };
 
 exports.getVendorWallets = async (req, res) => {
@@ -287,6 +314,7 @@ exports.createVendorWallet = async (req, res) => {
       vendor_id,
       opening_balance = 0,
       wallet_balance = 0,
+      hold_amount = 0,
       credit_limit = 0,
       outstanding_amount = 0,
       advance_amount = 0,
@@ -342,6 +370,7 @@ exports.createVendorWallet = async (req, res) => {
       vendor_id,
       opening_balance: toNumber(opening_balance),
       wallet_balance: toNumber(wallet_balance),
+      hold_amount: toNumber(hold_amount),
       credit_limit: toNumber(credit_limit),
       outstanding_amount: toNumber(outstanding_amount),
       advance_amount: toNumber(advance_amount),
@@ -385,6 +414,7 @@ exports.updateVendorWallet = async (req, res) => {
       vendor_id,
       opening_balance = 0,
       wallet_balance = 0,
+      hold_amount = 0,
       credit_limit = 0,
       outstanding_amount = 0,
       advance_amount = 0,
@@ -458,6 +488,7 @@ exports.updateVendorWallet = async (req, res) => {
       vendor_id,
       opening_balance: toNumber(opening_balance),
       wallet_balance: toNumber(wallet_balance),
+      hold_amount: toNumber(hold_amount),
       credit_limit: toNumber(credit_limit),
       outstanding_amount: toNumber(outstanding_amount),
       advance_amount: toNumber(advance_amount),
@@ -488,6 +519,37 @@ exports.updateVendorWallet = async (req, res) => {
       message: "Failed to update vendor wallet",
       error: error.message,
     });
+  }
+};
+
+exports.updateVendorWalletStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!["active", "inactive", "blocked"].includes(status)) {
+      return res.status(400).json({ success: false, message: "Status must be active, inactive or blocked" });
+    }
+
+    const meta = await getMeta();
+    if (!validateMeta(meta, res)) return;
+
+    if (!meta.status) {
+      return res.status(400).json({ success: false, message: "Status column not available on vendor_wallets table" });
+    }
+
+    const [result] = await db.query(
+      `UPDATE ${TABLE} SET \`${meta.status}\` = ? WHERE \`${meta.id}\` = ?`,
+      [status, id]
+    );
+
+    if (!result.affectedRows) {
+      return res.status(404).json({ success: false, message: "Vendor wallet not found" });
+    }
+
+    res.json({ success: true, message: `Vendor wallet ${status} successfully` });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to update vendor wallet status", error: error.message });
   }
 };
 
